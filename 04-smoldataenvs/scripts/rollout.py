@@ -43,14 +43,21 @@ Write one Python program in a ```python block, then stop.
 
 def build_prompt(row: dict) -> list[dict]:
     """The one prompt shape, so training and eval cannot drift apart."""
-    files = "\n".join(f"- {f}" for f in row["files"])
+    if row["files"]:
+        files = "\n".join(f"- {f}" for f in row["files"])
+    else:
+        files = (
+            "- No file names were provided by the dataset. The data is still staged in "
+            "/home/user/input; list /home/user/input first, for example with "
+            "os.listdir('/home/user/input'), then read the discovered files."
+        )
     return [
         {"role": "system", "content": SYSTEM},
         {"role": "user", "content": PROMPT.format(question=row["question"], files=files)},
     ]
 
 
-CODE_RE = re.compile(r"```(?:python|py)?\s*\n(.*?)```", re.S)
+CODE_RE = re.compile(r"```(?:python3?|py)?\s*\n(.*?)```", re.S | re.I)
 
 
 def extract_code(completion: str | list[dict]) -> str:
@@ -159,8 +166,11 @@ class SandboxRunner:
 # Adapted from 04-data-agent/envs/whitebox-bash/grader.py, where 42% of partial
 # credit once went to strings like `echo -n "2.14" > answer.txt`: the text contains
 # the right number and grades as the right answer.
+# A redirect only counts when something comes before it (`2.14 > answer.txt`): a value that
+# starts with `>` is an answer, e.g. the gold answers `>50K`, `> 2 Years` and `>40hrs`.
+# A pipe always counts: no gold answer contains one.
 _COMMAND_SHAPED = re.compile(
-    r"(^|\s)(echo|printf|cat|python3?|bash|sh|tee|awk|sed)\b|[>|]{1,2}\s*\S+|\$\(|`",
+    r"(^|\s)(echo|printf|cat|python3?|bash|sh|tee|awk|sed)\b|\|{1,2}\s*\S+|\S\s*>{1,2}\s*\S+|\$\(|`",
 )
 
 
