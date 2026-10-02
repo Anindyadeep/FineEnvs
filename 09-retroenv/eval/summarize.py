@@ -78,6 +78,19 @@ def main() -> int:
         *section("By step cap", "by_depth"),
         *section("By heuristic tier", "by_tier"),
         "",
+        "## Reading the table",
+        "",
+        "**No emit** is the share of episodes the model never closed with `emit_routes`; the harness "
+        "then submits an empty route set, which scores the 0.05 floor. **Refused** is the share the "
+        "provider declined on safety grounds, which counts as a failed episode and is never re-routed "
+        "to another model. Where the two columns match, every unclosed episode was a refusal, and the "
+        "model's reward is held down by requests it did not answer rather than by its chemistry.",
+        "",
+        "**Steps**, **Stock** and **Graph** are the step-correctness, stock-correctness and "
+        "graph-validity reward components. A model can score well on stock and graph while failing the "
+        "task: those measure that the submitted tree is well formed and its leaf claims are truthful, "
+        "not that the route matches the patent.",
+        "",
     ]
     args.output.mkdir(parents=True, exist_ok=True)
     (args.output / "RESULTS.md").write_text("\n".join(body), encoding="utf-8")

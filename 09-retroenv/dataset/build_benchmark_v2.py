@@ -264,6 +264,22 @@ def _with_split(task: RetroTask, split: str) -> RetroTask:
     )
 
 
+def write_checksums(out: Path) -> None:
+    """Hash the files a server must not run with silently altered: tasks and stock."""
+    import hashlib
+
+    files = sorted([*out.glob("tasks-private/*.jsonl"), out / "tasks-private/manifest.json",
+                    out / "normalized-routes.jsonl", *out.glob("stocks/*.smi")])
+    digests = {
+        str(path.relative_to(out)): hashlib.sha256(path.read_bytes()).hexdigest()
+        for path in files if path.exists()
+    }
+    (out / "checksums.json").write_text(
+        json.dumps({"schema_version": "retro-private-checksums-v1", "sha256": digests}, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def write(out: Path, tasks: list[RetroTask], stock: frozenset[str], manifest: dict) -> None:
     write_tasks(tasks, out / "tasks-private", manifest)
     (out / "tasks-public").mkdir(parents=True, exist_ok=True)
@@ -279,6 +295,7 @@ def write(out: Path, tasks: list[RetroTask], stock: frozenset[str], manifest: di
                 row = {"task_id": task.task_id, "target_smiles": task.target_smiles, **route.to_dict()}
                 handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
     (out / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    write_checksums(out)
 
 
 def main(argv: list[str] | None = None) -> int:

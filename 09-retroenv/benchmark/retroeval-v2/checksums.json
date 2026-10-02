@@ -3,6 +3,7 @@
   "sha256": {
     "difficulty.jsonl": "a98d54502a7d8b14e8c06685b2e5207a48db86754d7c2e59fe90b85e1effadd4",
     "normalized-routes.jsonl": "73db91192c66968a4c778152e276f141f02a97bd0923d2615f4885d1485dfb30",
+    "stocks/paroutes-v2-n1.smi": "a0505d832bccaa5ab74a259d0af1d5d1b06bc7b5a62eae9b61abbee99771f5c7",
     "tasks-private/dev.jsonl": "3357a5ae2f5e0b8d188746efefa1f68333bdb4d98a4b26280476efc49969ed50",
     "tasks-private/eval.jsonl": "9535657794ccec637a063ad88377635dce33db42874699566f9813b109998dd7",
     "tasks-private/manifest.json": "2d32e7fcc4ecec4459998814d9bab7e3026b1b16c748fa350cb8a27059d96b27",

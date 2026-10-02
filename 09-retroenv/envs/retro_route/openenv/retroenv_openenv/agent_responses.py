@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass
 from typing import Any
 
-from .agent import SYSTEM_PROMPT, normalize_arguments
+from .agent import SYSTEM_PROMPT, close_episode, normalize_arguments
 from .client import RetroEnvClient
 
 
@@ -135,11 +135,10 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
 
     auto_emitted = False
     if final is None:
-        outcome = env.call("emit_routes", {"submission": {"routes": []}})
+        final, fallback = close_episode(env)
         auto_emitted = True
-        result = outcome.result if isinstance(outcome.result, dict) else {}
-        final = {**(result.get("score") or {}), "reward": float(outcome.reward or 0.0)}
-        submission = {"routes": []}
+        if fallback is not None:
+            submission = fallback
 
     return {
         "reward": final.get("reward", 0.0),

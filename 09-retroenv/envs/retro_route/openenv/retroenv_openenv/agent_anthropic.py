@@ -13,21 +13,27 @@ shape. Two Claude-specific choices:
 from __future__ import annotations
 
 import json
+import sys
 import time
 from dataclasses import dataclass
 from typing import Any
 
 import anthropic
 
-from .agent import FINAL_TURN, SYSTEM_PROMPT, normalize_arguments
+from .agent import FINAL_TURN, SYSTEM_PROMPT, close_episode, normalize_arguments
 from .client import RetroEnvClient
 
 # USD per million tokens: input, output, cache read. Cache writes bill 1.25x input.
 PRICES = {
     "claude-opus-5-5": (4.00, 20.00, 0.20),
+    "claude-opus-5": (5.00, 25.00, 0.50),
+    "claude-opus-4-8": (5.00, 25.00, 0.50),
     "claude-sonnet-5-5": (2.00, 10.00, 0.20),
     "claude-sonnet-5": (2.00, 10.00, 0.20),
+    "claude-sonnet-4-6": (3.00, 15.00, 0.30),
     "claude-haiku-4-5": (1.00, 5.00, 0.10),
+    "claude-fable-5-1": (10.00, 50.00, 0.25),
+    "claude-fable-5": (10.00, 50.00, 1.00),
 }
 
 @dataclass
@@ -44,6 +50,8 @@ class ClaudeConfig:
 def _cost(model: str, usage: dict[str, int]) -> float | None:
     price = PRICES.get(model)
     if price is None:
+        # Better a visible gap in the board than a confident wrong total.
+        print(f"warning: no price for {model!r}; cost will be reported as null", file=sys.stderr)
         return None
     input_price, output_price, cache_read_price = price
     return (
@@ -164,11 +172,10 @@ def run_episode(
 
     auto_emitted = False
     if final is None:
-        outcome = env.call("emit_routes", {"submission": {"routes": []}})
+        final, fallback = close_episode(env)
         auto_emitted = True
-        result = outcome.result if isinstance(outcome.result, dict) else {}
-        final = {**(result.get("score") or {}), "reward": float(outcome.reward or 0.0)}
-        submission = {"routes": []}
+        if fallback is not None:
+            submission = fallback
 
     cost = _cost(config.model, usage)
     return {

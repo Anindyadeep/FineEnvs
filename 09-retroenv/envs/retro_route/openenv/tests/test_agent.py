@@ -64,3 +64,28 @@ def test_final_turn_exposes_only_emit_and_unsubmitted_episodes_score_the_floor(s
         result = agent.run_episode(llm, env, opening, agent.AgentConfig(model="scripted", max_turns=3))
     assert llm.exposed[-1] == ["emit_routes"]
     assert result["auto_emitted"] and result["reward"] < 0.1 and not result["valid"]
+
+
+def test_close_episode_keeps_a_score_the_server_already_recorded(server_url):
+    """A transport error after a successful emit must not become a floor score."""
+    from retroenv_openenv.agent import close_episode
+
+    with RetroEnvClient(server_url) as env:
+        env.reset("eval", index=9)
+        scored = env.call("emit_routes", {"submission": _oracle("eval", 9)})
+        assert scored.reward == 1.0
+        # The loop missed that reward (its call raised), so it closes the episode.
+        final, submission = close_episode(env)
+    assert final["reward"] == 1.0
+    assert final["recovered_after_transport_error"] is True
+    assert submission is None
+
+
+def test_close_episode_scores_the_floor_when_nothing_was_submitted(server_url):
+    from retroenv_openenv.agent import close_episode
+
+    with RetroEnvClient(server_url) as env:
+        env.reset("eval", index=9)
+        final, submission = close_episode(env)
+    assert final["reward"] < 0.1 and submission == {"routes": []}
+    assert "recovered_after_transport_error" not in final

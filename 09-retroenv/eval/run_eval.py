@@ -180,6 +180,28 @@ def breakdown(rows: list[dict[str, Any]], key: str, attempts: int) -> dict[str, 
     }
 
 
+def recompute(output: Path) -> int:
+    """Rebuild summary.json from episodes/ after a metrics change, without rerunning anything."""
+    identity = json.loads((output / "identity.json").read_text())
+    rows = [json.loads(path.read_text()) for path in sorted((output / "episodes").glob("*.json"))]
+    if not rows:
+        raise SystemExit(f"{output} has no episodes to recompute from")
+    attempts = identity["attempts"]
+    expected = len(identity["task_ids"]) * attempts
+    graded = [row for row in rows if row.get("graded")]
+    summary = summarize(rows, expected, attempts)
+    summary["label"] = identity["label"]
+    summary["model"] = identity["model"]
+    summary["toolset"] = identity["toolset"]
+    summary["by_kind"] = breakdown(graded, "kind", attempts)
+    summary["by_depth"] = breakdown(graded, "depth", attempts)
+    if any(row.get("tier") for row in graded):
+        summary["by_tier"] = breakdown(graded, "tier", attempts)
+    write_json(output / "summary.json", summary)
+    print(f"{output}: {summary['episodes_graded']}/{expected} graded", file=sys.stderr)
+    return 0
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--provider", choices=sorted(PROVIDERS), required=True)
@@ -205,9 +227,16 @@ def main() -> int:
     parser.add_argument("--max-cost", type=float, help="stop scheduling episodes once this many USD are spent")
     parser.add_argument("--difficulty", type=Path, help="private tier sidecar (default: <benchmark-dir>/difficulty.jsonl)")
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--recompute", action="store_true",
+                        help="rebuild summary.json from the stored episodes; no provider or server calls")
     args = parser.parse_args()
 
+    if args.recompute:
+        return recompute(args.output)
+
     preset = PROVIDERS[args.provider]
+    if args.temperature is not None and preset["backend"] != "openai":
+        parser.error(f"--temperature is not supported by the {args.provider} backend; use --effort or --reasoning-effort")
     key_env = args.api_key_env or preset["key"]
     if not os.getenv(key_env):
         parser.error(f"{key_env} is not set")
@@ -318,8 +347,10 @@ def main() -> int:
                     spent[0] += row["usage"].get("cost_usd") or 0.0
 
         def run(task: dict[str, Any], attempt: int) -> dict[str, Any] | None:
-            if args.max_cost is not None and spent[0] >= args.max_cost:
-                return None
+            if args.max_cost is not None:
+                with lock:
+                    if spent[0] >= args.max_cost:
+                        return None
             with RetroEnvClient(url) as env:
                 opening = env.reset(args.split, index=task["index"],
                                     episode_id=f"{identity['label']}:{task['task_id']}:{attempt}")

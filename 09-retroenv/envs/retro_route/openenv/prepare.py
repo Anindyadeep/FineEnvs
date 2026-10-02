@@ -29,14 +29,16 @@ def verify(root: Path) -> None:
         print(f"prepare: {root} has no checksums.json; skipping verification", file=sys.stderr)
         return
     expected = json.loads(manifest.read_text())["sha256"]
-    for name, digest in expected.items():
+    # The tasks and the stock both decide rewards, so a missing or altered file
+    # is a startup failure, not something to skip.
+    required = {name for name in expected if name.startswith(("tasks-private/", "stocks/"))}
+    for name in sorted(required):
         path = root / name
-        if not name.startswith("tasks-private/") or not path.exists():
-            continue  # only the files the server reads are required
-        actual = hashlib.sha256(path.read_bytes()).hexdigest()
-        if actual != digest:
+        if not path.exists():
+            raise SystemExit(f"prepare: {path} is listed in checksums.json but missing")
+        if hashlib.sha256(path.read_bytes()).hexdigest() != expected[name]:
             raise SystemExit(f"prepare: checksum mismatch for {path}")
-    print(f"prepare: verified {root}", file=sys.stderr)
+    print(f"prepare: verified {len(required)} file(s) in {root}", file=sys.stderr)
 
 
 def main() -> int:

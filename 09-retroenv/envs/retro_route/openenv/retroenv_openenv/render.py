@@ -39,7 +39,7 @@ STYLE = """
 def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
-        return f'<span class="muted">unparsable SMILES</span>'
+        return '<span class="muted">unparsable SMILES</span>'
     drawer = rdMolDraw2D.MolDraw2DSVG(width, height)
     options = drawer.drawOptions()
     options.clearBackground = False
@@ -91,7 +91,7 @@ def _route_node(node: Any, depth: int = 0) -> str:
             continue
         metadata = reaction.get("metadata") or {}
         title = html.escape(str(metadata.get("reaction_class") or "reaction"))
-        note = html.escape(str(metadata.get("explanation") or ""))[:240]
+        note = html.escape(str(metadata.get("explanation") or "")[:240])  # slice first: never split an entity
         children = "".join(_route_node(child, depth + 1) for child in reaction.get("children") or [])
         out += f'<div class="tree"><div class="rxn">{title}{" · " + note if note else ""}</div>{children}</div>'
     return out

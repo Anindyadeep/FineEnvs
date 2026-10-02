@@ -89,6 +89,27 @@ def _request(client: Any, config: AgentConfig, messages: list, tools: list) -> A
     return client.chat.completions.create(**kwargs)
 
 
+def close_episode(env: RetroEnvClient) -> tuple[dict[str, Any], Any]:
+    """Score an episode the model never closed, and return (score, submission).
+
+    An emit_routes call that failed in transport may still have been scored by
+    the server. Submitting an empty route set then returns that earlier score
+    with an "error" saying the episode is already complete, so the recorded
+    reward is the one the routes actually earned; ``submission`` is None in
+    that case, because the empty set was not what was scored.
+    """
+    outcome = env.call("emit_routes", {"submission": {"routes": []}})
+    result = outcome.result if isinstance(outcome.result, dict) else {}
+    score = dict(result.get("score") or {})
+    already_complete = "error" in result
+    if outcome.reward is not None:
+        score["reward"] = float(outcome.reward)
+    score.setdefault("reward", 0.0)
+    if already_complete:
+        score["recovered_after_transport_error"] = True
+    return score, None if already_complete else {"routes": []}
+
+
 def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: AgentConfig) -> dict[str, Any]:
     tools = env.openai_tools()
     emit_tool = [tool for tool in tools if tool["function"]["name"] == "emit_routes"]
@@ -112,7 +133,8 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
 
     for turn_index in range(config.max_turns):
         terminal_turn = force_terminal or turn_index == config.max_turns - 1
-        if terminal_turn and config.tool_choice != "required":
+        # force_terminal already told the model this in the nudge below.
+        if terminal_turn and not force_terminal and config.tool_choice != "required":
             final_turn = {"role": "user", "content": FINAL_TURN}
             messages.append(final_turn)
             transcript.append(final_turn)
@@ -203,12 +225,10 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
 
     auto_emitted = False
     if final is None:
-        # Close the episode so the server scores it (an empty route set is the floor).
-        outcome = env.call("emit_routes", {"submission": {"routes": []}})
+        final, fallback = close_episode(env)
         auto_emitted = True
-        result = outcome.result if isinstance(outcome.result, dict) else {}
-        final = {**(result.get("score") or {}), "reward": float(outcome.reward or 0.0)}
-        submission = {"routes": []}
+        if fallback is not None:
+            submission = fallback
 
     return {
         "reward": final.get("reward", 0.0),

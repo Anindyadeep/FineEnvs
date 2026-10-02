@@ -152,6 +152,10 @@ class RemoteRetroRouteEnv:
     def get_reward(self) -> float:
         return self._reward
 
+    def _close(self) -> None:
+        """Release the WebSocket session. TRL and the evaluators call this."""
+        self._client.close()
+
     def _call(self, name: str, **arguments: Any) -> str:
         outcome = self._client.call(name, arguments)
         if outcome.reward is not None:

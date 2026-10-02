@@ -76,9 +76,16 @@ class PlaygroundSession:
 
     def start(self, split: str, index: int) -> None:
         with self.lock:
+            self.close()
             self.env = RetroRouteEnvironment()
             self.opening = self.env.reset(split=split, index=int(index)).metadata
             self.history, self.submission, self.score = [], None, None
+
+    def close(self) -> None:
+        with self.lock:
+            if self.env is not None:
+                self.env.close()
+                self.env = None
 
     def call(self, tool: str, arguments: dict[str, Any]) -> Any:
         with self.lock:
