@@ -1,62 +1,90 @@
-# 04 · RetroEnv
+# 09 · RetroEnv
 
-RetroEnv is a small, runnable retrosynthesis RL environment built from real
-PaRoutes v2 route trees and its n1 stock. It already reaches the complete loop:
+Plan a retrosynthesis: given a target molecule, work back to molecules you can
+buy. The agent searches a fixed stock and training precedents, checks
+disconnections, and submits molecule/reaction trees. A deterministic verifier
+scores them against patent routes it never shows.
 
 ```text
-raw licensed routes → normalized references → strict split → hidden tasks
-→ bounded multi-turn tools → renderable graphs → deterministic reward → eval
+licensed route trees → normalized references → leak-audited split → hidden tasks
+→ bounded multi-turn tools → route graphs → dense reward → eval
 ```
 
-This is an initial evaluation set, not yet a large scientific benchmark. RDKit and hidden
-reaction records can establish structural consistency and dataset support; they
-cannot establish that a synthesis will work experimentally.
+RDKit and the hidden records establish structural consistency and dataset
+support. They do not establish that a synthesis works experimentally, so results
+say `dataset_supported`, never `experimentally_validated`.
 
-## Current artifact
+## Layout
 
-`benchmark/retroeval-v1/` contains 100 verified alternate-route tasks mined
-from the downloaded `all_loaded_routes.json.gz` archive. `sample/` remains the
-12-task development fixture.
+| Path | What it is |
+|---|---|
+| [`envs/retro_route/core`](envs/retro_route/core) | The `retroenv` package: chemistry, stock search, tasks, verifier, tool schemas, and the pure-Python session every front-end shares |
+| [`envs/retro_route/openenv`](envs/retro_route/openenv) | The OpenEnv server, client, agent loops, playground and Docker/Space deployment |
+| [`dataset/`](dataset) | Mining, task building, difficulty labels, and the audit |
+| [`eval/`](eval) | `run_eval.py` through the server, plus the v1 board tools |
+| [`benchmark/`](benchmark) | `retroeval-v1` (100 tasks, committed with references) and [`retroeval-v2`](benchmark/retroeval-v2) (1,000 tasks) |
+| [`train/`](train) | The TRL GRPO smoke recipe |
+| [`web/`](web) | Static explorer for the v1 board trajectories |
 
-| Split | Tasks | References visible to policy? |
-|---|---:|---|
-| train | 40 | No |
-| dev | 20 | No |
-| eval | 20 | No |
-| stress | 20 | No |
+## Benchmarks
 
-Each task has 2–5 distinct first-cut references, at most three reaction nodes,
-and terminal leaves found by exact lookup in the frozen 13,432-molecule n1
-stock. The split audit reports zero crossings for canonical targets, hidden
-route products, their Murcko scaffolds, route IDs, reaction IDs, patent groups,
-and route-product near-duplicates at Morgan Tanimoto ≥0.90. Private references live only under
-`benchmark/retroeval-v1/tasks-private`; reference-free HF-ready rows are under
-`benchmark/retroeval-v1/tasks-public`.
+`benchmark/retroeval-v2` is the current set: 1,000 tasks, at most 3 steps, every
+leaf in the frozen 13,432-molecule n1 stock. Its private references are rebuilt
+rather than committed; see [its README](benchmark/retroeval-v2/README.md) for the
+splits, the selection rules and the rebuild.
 
-Rebuild it deterministically from the downloaded raw artifact:
+| Set | Tasks | train / dev / eval / stress | References in git |
+|---|---:|---:|---|
+| `retroeval-v1` | 100 | 40 / 20 / 20 / 20 | Yes |
+| `retroeval-v2` | 1,000 | 600 / 100 / 150 / 150 | No, rebuilt from the scripts |
+
+Both pass `dataset/audit_benchmark.py`: no target, scaffold, intermediate,
+reaction, patent or near-duplicate at Morgan Tanimoto ≥ 0.90 crosses a split,
+and every reference route and oracle graph replays through the serving verifier.
+
+## Run it
 
 ```bash
-uv run python dataset/build_training_sample.py \
-  --sample-size 100 --ratios 0.4 0.2 0.2 0.2 \
-  --output-dir benchmark/retroeval-v1
+uv sync --extra dev --extra eval
+uv run pytest
 
-uv run python dataset/audit_benchmark.py \
-  --benchmark-dir benchmark/retroeval-v1 \
-  --expected-eval-tasks 20 \
-  --output benchmark/retroeval-v1/audit.json
+RETROENV_BENCHMARK_DIR=benchmark/retroeval-v2 uv run uvicorn retroenv_openenv.server:app --port 8000
 ```
 
-The build manifest pins the archive and stock SHA-256 values, source URL,
-license, selection counts, verifier replay requirement, split strategy, and
-leakage audit. Of 457,166 raw trees, 125 targets had at least two stock-closed
-routes with distinct first cuts under the three-step cap.
+Open <http://localhost:8000/web/> to try a task by hand; the API is at `/docs`.
+One model episode against that server:
+
+```bash
+uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000 \
+  --split eval --index 0 --provider anthropic --model claude-opus-5-5
+```
+
+A whole split, with a server started for you:
+
+```bash
+uv run python eval/run_eval.py --provider anthropic --model claude-opus-5-5 \
+  --split eval --output runs/v2-eval/claude-opus-5-5
+uv run python eval/summarize.py runs/v2-eval/* --output benchmark/retroeval-v2/results
+```
+
+See [`envs/retro_route/openenv/README.md`](envs/retro_route/openenv/README.md) for
+the server, Docker and Space deployment, and [`eval/README.md`](eval/README.md)
+for providers, resuming and cost caps.
 
 ## Harness
 
 `reset(split=..., index=...)` is deterministic and returns only the target,
 budgets, stock ID, prompt, and tool names. It never returns a reference route,
 reference count, patent ID, or answer-bearing metadata. Stock is not embedded
-in the prompt.
+in the prompt. Tools are MCP calls, capped at 32 per episode
+(`RETROENV_MAX_TOOL_CALLS`); `emit_routes` always stays available, and the step
+that calls it carries `done` and the reward.
+
+`RETROENV_TOOLSET=unaided` removes `validate_disconnection` and
+`reaction_class_lookup`, and stops `reaction_conditions_search` answering from a
+matched hidden record. Those three are the only tools that consult this task's
+references, so the unaided surface measures retrosynthesis without an answer
+oracle. Scores from the two toolsets are not comparable.
 
 | Tool | Deterministic rollout behavior |
 |---|---|
@@ -146,18 +174,9 @@ uv run python eval/run_baselines.py
 Expected result: oracle ceiling `1.000/pass`, one-route ablation `0.788/fail`,
 and empty graph floor `0.050/fail`. These are not model baselines.
 
-## Run and evaluate
+## The v1 board
 
-```bash
-uv sync --extra dev --extra eval
-uv run pytest
-
-RETROENV_TASKS_DIR=sample/tasks-private \
-RETROENV_STOCKS_DIR=sample/stocks \
-uv run retroenv-server
-```
-
-For any OpenAI-compatible endpoint with native tool calling:
+The v1 board (20 tasks, run in-process over OpenRouter) used `eval/run_model.py`:
 
 ```bash
 uv run python eval/run_model.py \
@@ -196,7 +215,7 @@ uv run python -m http.server 8080 --directory web
 
 Open <http://localhost:8080> or open `web/index.html` directly.
 
-For the first GRPO experiment, overfit the six `sample/` training tasks before scaling:
+For the first GRPO experiment, overfit a handful of training tasks before scaling:
 use deterministic `(split, index)` reset, 4–8 rollouts per group, and monitor
 within-task reward standard deviation—not only mean reward. The environment
 server used for training must be the same image and private task bundle used for
