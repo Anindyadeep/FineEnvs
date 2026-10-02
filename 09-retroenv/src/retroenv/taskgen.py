@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from rdkit import Chem, DataStructs
-from rdkit.Chem import rdFingerprintGenerator
+from rdkit.Chem import rdFingerprintGenerator, rdMolDescriptors
 
 from .chemistry import (
     canonicalize_components,
@@ -385,20 +385,49 @@ def assign_strict_splits(
     }
 
 
-def audit_splits(tasks: Iterable[RetroTask]) -> dict[str, Any]:
+def is_single_ring_scaffold(scaffold: str) -> bool:
+    """True for acyclic keys and one-ring scaffolds (benzene, pyridine, piperidine, ...)."""
+    if scaffold.startswith("acyclic:"):
+        return True
+    mol = Chem.MolFromSmiles(scaffold)
+    return mol is not None and rdMolDescriptors.CalcNumRings(mol) == 1
+
+
+def scaffold_group_key(smiles: str, *, exact_single_ring: bool = False) -> str:
+    """Murcko scaffold used for split grouping.
+
+    A one-ring scaffold such as benzene is shared by thousands of unrelated
+    compounds, so grouping on it merges most of a large benchmark into one
+    split. With ``exact_single_ring`` those molecules group by their exact
+    canonical structure instead, as acyclic molecules already do; Morgan
+    near-duplicate edges still catch close analogues.
+    """
+    scaffold = scaffold_smiles(smiles)
+    if exact_single_ring and is_single_ring_scaffold(scaffold):
+        return f"exact:{canonicalize_smiles(smiles)}"
+    return scaffold
+
+
+def audit_splits(
+    tasks: Iterable[RetroTask], *, exact_single_ring_scaffolds: bool = False
+) -> dict[str, Any]:
     by_split: dict[str, dict[str, set[str]]] = {
         split: defaultdict(set) for split in SPLITS
     }
     for task in tasks:
         bucket = by_split[task.split]
         bucket["targets"].add(canonicalize_smiles(task.target_smiles))
-        bucket["scaffolds"].add(scaffold_smiles(task.target_smiles))
+        bucket["scaffolds"].add(
+            scaffold_group_key(task.target_smiles, exact_single_ring=exact_single_ring_scaffolds)
+        )
         for route in task.reference_routes:
             bucket["route_ids"].add(route.route_id)
             for step in route.steps:
                 product = canonicalize_smiles(step.product)
                 bucket["route_products"].add(product)
-                product_scaffold = scaffold_smiles(product)
+                product_scaffold = scaffold_group_key(
+                    product, exact_single_ring=exact_single_ring_scaffolds
+                )
                 if product_scaffold:
                     bucket["route_product_scaffolds"].add(product_scaffold)
                 if step.reaction_id:

@@ -106,7 +106,13 @@ def _cross_split_near_duplicates(tasks: Iterable[Any], threshold: float) -> list
     return overlaps
 
 
-def audit(root: Path, *, expected_eval_tasks: int = 20, threshold: float = 0.90) -> dict[str, Any]:
+def audit(
+    root: Path,
+    *,
+    expected_eval_tasks: int = 20,
+    threshold: float = 0.90,
+    exact_single_ring_scaffolds: bool = False,
+) -> dict[str, Any]:
     private_dir = root / "tasks-private"
     public_dir = root / "tasks-public"
     stocks_dir = root / "stocks"
@@ -120,7 +126,7 @@ def audit(root: Path, *, expected_eval_tasks: int = 20, threshold: float = 0.90)
             f"eval contains {counts['eval']} tasks, expected {expected_eval_tasks}"
         )
 
-    split_audit = audit_splits(tasks)
+    split_audit = audit_splits(tasks, exact_single_ring_scaffolds=exact_single_ring_scaffolds)
     if not split_audit["passed"]:
         failures.append("exact target/scaffold/route/reaction/source split leakage")
     near_duplicates = _cross_split_near_duplicates(tasks, threshold)
@@ -244,11 +250,17 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--expected-eval-tasks", type=int, default=20)
     parser.add_argument("--near-duplicate-threshold", type=float, default=0.90)
     parser.add_argument("--output", type=Path)
+    parser.add_argument(
+        "--exact-single-ring-scaffolds",
+        action="store_true",
+        help="group one-ring and acyclic molecules by exact structure (v2 split rule)",
+    )
     args = parser.parse_args(argv)
     result = audit(
         args.benchmark_dir,
         expected_eval_tasks=args.expected_eval_tasks,
         threshold=args.near_duplicate_threshold,
+        exact_single_ring_scaffolds=args.exact_single_ring_scaffolds,
     )
     rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:
