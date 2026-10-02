@@ -1,7 +1,7 @@
 # Project manifest. `tools/build_index.py` renders the root README table from it.
 name: retroenv
 title: "RetroEnv"
-tagline: "Build provenance-preserving reaction tasks and train agents to plan verifier-backed retrosyntheses."
+tagline: "Plan retrosyntheses back to purchasable molecules, scored against patent routes by a deterministic verifier."
 order: 9
 status: wip
 
@@ -12,7 +12,7 @@ hub:
 
 envs:
   - name: retro_route
-    summary: "Multi-turn retrosynthesis with bounded retrieval, validation, graph emission, and dense deterministic scoring."
+    summary: "Multi-turn retrosynthesis: stock and precedent search, disconnection checks, route-tree submission, dense verifier reward."
     backend: rdkit-offline
     tools: 9
     frameworks:

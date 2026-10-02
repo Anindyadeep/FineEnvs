@@ -4,6 +4,9 @@
 Run this from the project checkout in a TRL image/environment. It is deliberately
 small: prove the base model can use the graph tools and overfit a few indexed
 tasks before creating a large job.
+
+Set RETROENV_SERVER to train against a running OpenEnv server (local or a
+Space), the same one eval/run_eval.py uses; otherwise the session runs in-process.
 """
 
 from __future__ import annotations
@@ -18,6 +21,7 @@ from trl import GRPOConfig, GRPOTrainer
 
 from retroenv.store import TaskStore
 from retroenv.training import RetroRouteTrainingEnv
+from retroenv_openenv.client import RemoteRetroRouteEnv, RetroEnvClient
 
 
 MODEL = os.getenv("MODEL", "Qwen/Qwen3.5-4B")
@@ -25,15 +29,23 @@ OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/retroenv-grpo-smoke")
 NUM_GENERATIONS = int(os.getenv("NUM_GENERATIONS", "4"))
 MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))
 SEED = int(os.getenv("SEED", "17"))
+SERVER = os.getenv("RETROENV_SERVER")
 
 
-def build_dataset() -> Dataset:
+def train_size() -> int:
+    if SERVER:
+        with RetroEnvClient(SERVER) as client:
+            return client.num_tasks("train")
     root = Path(__file__).resolve().parents[1]
     store = TaskStore(
         os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"),
         os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"),
     )
-    indices = list(range(len(store.tasks("train"))))
+    return len(store.tasks("train"))
+
+
+def build_dataset() -> Dataset:
+    indices = list(range(min(train_size(), int(os.getenv("MAX_TASKS", "1000000")))))
     random.Random(SEED).shuffle(indices)
     return Dataset.from_list(
         [
@@ -54,7 +66,7 @@ def main() -> None:
     trainer = GRPOTrainer(
         model=MODEL,
         train_dataset=build_dataset(),
-        environment_factory=RetroRouteTrainingEnv,
+        environment_factory=RemoteRetroRouteEnv if SERVER else RetroRouteTrainingEnv,
         peft_config=LoraConfig(
             r=16,
             lora_alpha=32,

@@ -15,6 +15,7 @@ from .chemistry import (
 )
 from .models import RetroTask
 from .retrieval import PrecedentIndex, StockIndex, cached_stock_index, molecule_lookup
+from .tools import ORACLE_TOOLS, tool_names
 from .verifier import RouteVerifier
 
 
@@ -32,6 +33,8 @@ must differ at the first cut. Every item in submission.routes must be the root
 molecule object directly: never wrap it in route, root, tree, or route_id keys.
 Validate proposed cuts before emitting. Dataset
 support is not proof that a reaction will work experimentally."""
+# The unaided toolset has no validator, so its prompt drops that instruction.
+_VALIDATE_SENTENCE = "Validate proposed cuts before emitting. "
 
 
 class RetroRouteSession:
@@ -56,9 +59,14 @@ class RetroRouteSession:
         max_search_results: int = 20,
         precedent_index: PrecedentIndex | None = None,
         pubchem_cache: dict[str, dict[str, Any]] | None = None,
+        toolset: str = "full",
     ):
         if max_tool_calls < 1:
             raise ValueError("max_tool_calls must be positive")
+        self.toolset = toolset
+        self.tool_names = tool_names(toolset)
+        # Hidden-reference answers are only reachable when every oracle tool is on.
+        self.reference_oracle = all(name in self.tool_names for name in ORACLE_TOOLS)
         self.max_tool_calls = max_tool_calls
         self.max_search_results = max_search_results
         self.precedent_index = precedent_index or PrecedentIndex(())
@@ -95,6 +103,14 @@ class RetroRouteSession:
 
     def observation(self, feedback: str = "") -> dict[str, Any]:
         task = self._require_task()
+        prompt = PROMPT.format(
+            target=task.target_smiles,
+            max_steps=task.max_steps,
+            min_routes=task.min_routes,
+            max_routes=task.max_routes,
+        )
+        if not self.reference_oracle:
+            prompt = prompt.replace(_VALIDATE_SENTENCE, "")
         return {
             "episode_id": self.episode_id,
             "task_id": task.task_id,
@@ -102,13 +118,8 @@ class RetroRouteSession:
             "target_smiles": task.target_smiles,
             "max_steps": task.max_steps,
             "stock_id": task.stock_id,
-            "prompt": PROMPT.format(
-                target=task.target_smiles,
-                max_steps=task.max_steps,
-                min_routes=task.min_routes,
-                max_routes=task.max_routes,
-            ),
-            "available_tools": list(self.TOOL_NAMES),
+            "prompt": prompt,
+            "available_tools": list(self.tool_names),
             "tool_calls_used": self.tool_calls,
             "tool_calls_remaining": max(0, self.max_tool_calls - self.tool_calls),
             "candidate_count": len(self.candidates),
@@ -214,6 +225,8 @@ class RetroRouteSession:
         reactants: Iterable[str] | str,
         reaction_class: str | None = None,
     ) -> dict[str, Any]:
+        if not self.reference_oracle:
+            return self._unavailable("validate_disconnection")
         blocked = self._consume("validate_step")
         if blocked:
             return blocked
@@ -240,6 +253,8 @@ class RetroRouteSession:
         reactants: Iterable[str] | str,
     ) -> dict[str, Any]:
         """Name a cut only after the agent supplies a supported disconnection."""
+        if not self.reference_oracle:
+            return self._unavailable("reaction_class_lookup")
         blocked = self._consume("reaction_class_lookup")
         if blocked:
             return blocked
@@ -267,7 +282,9 @@ class RetroRouteSession:
         if blocked:
             return blocked
         task = self._require_task()
-        if product_smiles and reactants:
+        # Without the oracle, a supported cut must not reveal itself through
+        # "supported": true or the hidden record's reagents.
+        if self.reference_oracle and product_smiles and reactants:
             reactant_values = reactants.split(".") if isinstance(reactants, str) else reactants
             validation = self.verifier.validate_step(
                 task, product_smiles, reactant_values, reaction_class or None
@@ -396,6 +413,12 @@ class RetroRouteSession:
             }
         self.tool_calls += 1
         return None
+
+    def _unavailable(self, tool_name: str) -> dict[str, Any]:
+        return {
+            "error": f"{tool_name} is not available in the {self.toolset!r} toolset",
+            "tool": tool_name,
+        }
 
     def _require_task(self) -> RetroTask:
         if self.task is None:

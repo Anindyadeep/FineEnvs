@@ -1,0 +1,86 @@
+{
+  "audit_overlap_kinds": [],
+  "ratios": {
+    "dev": 0.1,
+    "eval": 0.15,
+    "stress": 0.15,
+    "train": 0.6
+  },
+  "requested_tasks": 1000,
+  "schema_version": "retro-benchmark-v2-draft",
+  "selection": {
+    "selected_single_route": 890,
+    "selected_two_route": 22,
+    "selected_v1_pinned": 88,
+    "skip_patent_already_used": 123,
+    "skip_scaffold_cap": 215,
+    "v1_dropped_target_in_stock": 12
+  },
+  "selection_rules": {
+    "exact_single_ring_scaffolds": true,
+    "exclude_target_in_stock": true,
+    "max_per_patent": 1,
+    "multi_ring_scaffold_cap": 1,
+    "near_duplicate_threshold": 0.9,
+    "pool": ".local/pool/pool-n1-s3.jsonl",
+    "single_ring_or_acyclic_scaffold_cap": "pool share x tasks",
+    "single_route_step_shares": {
+      "2": 0.5,
+      "3": 0.5
+    },
+    "v1_tasks_pinned_to_v1_split": true
+  },
+  "source": {
+    "archive": "data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz",
+    "archive_sha256": "d504e5964af1b09632d4048f6ab81d626babc5d344dff1be00ece312716f2405",
+    "license": "CC-BY-4.0",
+    "name": "paroutes-v2-benchmark",
+    "url": "https://zenodo.org/records/7341155"
+  },
+  "split": {
+    "by_split_and_kind": {
+      "dev/single_route": 78,
+      "dev/two_route": 4,
+      "dev/v1_pinned": 18,
+      "eval/single_route": 132,
+      "eval/two_route": 2,
+      "eval/v1_pinned": 16,
+      "stress/single_route": 130,
+      "stress/two_route": 3,
+      "stress/v1_pinned": 17,
+      "train/single_route": 550,
+      "train/two_route": 13,
+      "train/v1_pinned": 37
+    },
+    "component_sizes_top": [
+      16,
+      10,
+      9,
+      7,
+      7,
+      6,
+      6,
+      5,
+      5,
+      4,
+      4,
+      4
+    ],
+    "components": 830,
+    "counts": {
+      "dev": 100,
+      "eval": 150,
+      "stress": 150,
+      "train": 600
+    },
+    "largest_component": 16,
+    "near_duplicate_edges": 2
+  },
+  "stock": {
+    "id": "paroutes-v2-n1",
+    "molecules": 13432,
+    "sha256": "b8641e2028846d995953b30f7acd36e7521d0301159518d172497340a0bfb115",
+    "source_path": "data/raw/paroutes-v2-benchmark/stock_n1.txt"
+  },
+  "strict_audit_passed": true
+}

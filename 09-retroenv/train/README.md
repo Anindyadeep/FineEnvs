@@ -26,7 +26,17 @@ uv run --with 'trl[vllm]>=1.12,<1.13' --with datasets --with peft \
   python train/grpo_smoke.py
 ```
 
-It uses `RetroRouteTrainingEnv` as `environment_factory`, four generations per
+To train against the OpenEnv server instead, the same one evaluation uses, start it
+and point the script at it. Each rollout then holds one WebSocket session:
+
+```bash
+RETROENV_BENCHMARK_DIR=benchmark/retroeval-v2 uv run uvicorn retroenv_openenv.server:app --port 8000 &
+RETROENV_SERVER=http://127.0.0.1:8000 MAX_TASKS=8 uv run --with 'trl[vllm]>=1.12,<1.13' \
+  --with datasets --with peft python train/grpo_smoke.py
+```
+
+`MAX_TASKS` limits the train split for an overfit run. In-process, it uses
+`RetroRouteTrainingEnv` as `environment_factory`, four generations per
 indexed task, Dr. GRPO, ten optimizer steps, and optional JSONL traces via
 `RETROENV_TRACE_PATH=outputs/episodes.jsonl`. Treat it as a wiring/overfit run;
 do not publish its six-task metric as model quality.
