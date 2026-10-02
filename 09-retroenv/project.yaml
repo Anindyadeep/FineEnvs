@@ -2,8 +2,8 @@
 name: retroenv
 title: "RetroEnv"
 tagline: "Build provenance-preserving reaction tasks and train agents to plan verifier-backed retrosyntheses."
-order: 4
-status: demo-ready
+order: 9
+status: wip
 
 hub:
   org: FineEnvs
