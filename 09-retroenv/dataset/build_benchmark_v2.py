@@ -73,11 +73,13 @@ def make_task(row: dict, split: str = "unassigned") -> RetroTask:
     )
 
 
-def group_keys(task: RetroTask, exact_single_ring: bool) -> list[tuple[str, str]]:
-    """The keys of taskgen.assign_strict_splits, with the optional single-ring scaffold rule."""
+def group_keys(
+    task: RetroTask, exact_single_ring: bool, generic: frozenset[str] = frozenset()
+) -> list[tuple[str, str]]:
+    """The keys of taskgen.assign_strict_splits, with the optional exact-structure scaffold rules."""
 
     def scaffold_key(kind: str, smiles: str) -> tuple[str, str]:
-        return (kind, scaffold_group_key(smiles, exact_single_ring=exact_single_ring))
+        return (kind, scaffold_group_key(smiles, exact_single_ring=exact_single_ring, generic=generic))
 
     keys = [("target", canonicalize_smiles(task.target_smiles)), scaffold_key("scaffold", task.target_smiles)]
     for route in task.reference_routes:
@@ -97,8 +99,14 @@ def group_keys(task: RetroTask, exact_single_ring: bool) -> list[tuple[str, str]
 class Groups:
     """Incremental union-find over admitted tasks, with optional split pins per group."""
 
-    def __init__(self, exact_single_ring: bool, threshold: float, fill_split: str | None = None):
-        self.exact_single_ring, self.threshold = exact_single_ring, threshold
+    def __init__(
+        self,
+        exact_single_ring: bool,
+        threshold: float,
+        fill_split: str | None = None,
+        generic: frozenset[str] = frozenset(),
+    ):
+        self.exact_single_ring, self.threshold, self.generic = exact_single_ring, threshold, generic
         # In fill mode every new task joins ``fill_split``, so near-duplicates only
         # matter against tasks pinned elsewhere; skipping the rest keeps 50k builds fast.
         self.fill_split = fill_split
@@ -115,8 +123,9 @@ class Groups:
             i = self.parent[i]
         return i
 
-    def admit(self, task: RetroTask, pin: str | None = None) -> bool:
-        keys = group_keys(task, self.exact_single_ring)
+    def contacts(self, task: RetroTask) -> tuple[list, list, set[int], set[int]]:
+        """The task's keys and fingerprints, and the groups it touches by key and by near-duplicate."""
+        keys = group_keys(task, self.exact_single_ring, self.generic)
         products = sorted(
             {canonicalize_smiles(s.product) for r in task.reference_routes for s in r.steps}
             | {canonicalize_smiles(task.target_smiles)}
@@ -129,6 +138,10 @@ class Groups:
                 sims = np.asarray(DataStructs.BulkTanimotoSimilarity(fp, self.fps))
                 for j in np.nonzero(sims >= self.threshold)[0]:
                     near.add(self.find(self.owners[j]))
+        return keys, fps, roots, near
+
+    def admit(self, task: RetroTask, pin: str | None = None, contacts: tuple | None = None) -> bool:
+        keys, fps, roots, near = contacts or self.contacts(task)
         touched = roots | near
         pins = {self.pin[r] for r in touched if r in self.pin} | ({pin} if pin else set())
         if len(pins) > 1:

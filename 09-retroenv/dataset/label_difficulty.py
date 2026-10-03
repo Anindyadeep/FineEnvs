@@ -6,13 +6,14 @@ features such as the first-step reaction family are hints. The tier is a
 transparent point score meant for stratifying and curriculum ordering until
 model pass rates replace it:
 
-  +1  the shortest reference route has 3 steps
+  +1  the shortest reference route has 3 or more steps
+  +1  it has 4 or more steps (v3 and later; v2 routes stop at 3, so v2 tiers are unchanged)
   +1  no train-split target with Morgan Tanimoto >= 0.30 (weak precedent search)
   +1  first-step family outside the common set (Boc in/out, amide/ester, reductive
       amination, one-reactant FGI, alkylation/SNAr)
   +1  some leaf appears in <= 5 routes of the whole PaRoutes archive
 
-  tier: 0-1 easy, 2 medium, 3-4 hard
+  tier: 0-1 easy, 2 medium, 3-5 hard
 
 On the 20 v1 eval tasks with 8 models, only train similarity was significant
 (Spearman 0.50 with mean reward); treat the tier as a prior, not a measurement.
@@ -36,22 +37,10 @@ from mine_route_pool import _leaves  # noqa: E402
 
 sys.path.append(os.path.join(RDConfig.RDContribDir, "SA_Score"))
 import sascorer  # noqa: E402
+from retroenv.disconnections import step_family  # noqa: E402  (one copy, shared with the expert)
 
 SPLITS = ("train", "dev", "eval", "stress")
 FPG = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-PATTERNS = {
-    "boronic": Chem.MolFromSmarts("[#6]B([OX2])[OX2]"),
-    "acyl_halide": Chem.MolFromSmarts("C(=O)[Cl,Br]"),
-    "acid": Chem.MolFromSmarts("[CX3](=O)[OX2H1]"),
-    "amine": Chem.MolFromSmarts("[NX3;H2,H1;!$(NC=O)]"),
-    "alcohol": Chem.MolFromSmarts("[OX2H][CX4,c]"),
-    "carbonyl": Chem.MolFromSmarts("[CX3H1,CX3H0;!$(C(=O)[O,N])](=O)[#6,#1]"),
-    "halide": Chem.MolFromSmarts("[#6][Cl,Br,I]"),
-    "sulfonyl_halide": Chem.MolFromSmarts("S(=O)(=O)[Cl,F]"),
-    "isocyanate": Chem.MolFromSmarts("N=C=O"),
-}
-BOC = Chem.MolFromSmarts("CC(C)(C)OC(=O)[N,O,n]")
-BOC2O = Chem.MolFromSmiles("CC(C)(C)OC(=O)OC(=O)OC(C)(C)C")
 COMMON = {
     "Boc protection",
     "Boc deprotection",
@@ -60,38 +49,6 @@ COMMON = {
     "one-reactant FGI",
     "alkylation / SNAr",
 }
-
-
-def _has(smiles: str, key: str) -> bool:
-    mol = Chem.MolFromSmiles(smiles)
-    return mol is not None and mol.HasSubstructMatch(PATTERNS[key])
-
-
-def step_family(reactants: list[str], product: str) -> str:
-    """Coarse rule-based reaction family; 'other' when no rule fires."""
-    mols = [Chem.MolFromSmiles(r) for r in reactants]
-    if any(m is not None and m.HasSubstructMatch(BOC2O) for m in mols):
-        return "Boc protection"
-    if len(reactants) == 1:
-        p = Chem.MolFromSmiles(product)
-        if mols[0].HasSubstructMatch(BOC) and len(p.GetSubstructMatches(BOC)) < len(mols[0].GetSubstructMatches(BOC)):
-            return "Boc deprotection"
-        return "one-reactant FGI"
-    if any(_has(r, "boronic") for r in reactants):
-        return "Suzuki-type coupling"
-    if any(_has(r, "sulfonyl_halide") for r in reactants):
-        return "sulfonylation"
-    if any(_has(r, "isocyanate") for r in reactants):
-        return "urea / carbamate"
-    if any(_has(r, "acyl_halide") or _has(r, "acid") for r in reactants) and any(
-        _has(r, "amine") or _has(r, "alcohol") for r in reactants
-    ):
-        return "amide/ester coupling"
-    if any(_has(r, "carbonyl") for r in reactants) and any(_has(r, "amine") for r in reactants):
-        return "reductive amination"
-    if any(_has(r, "halide") for r in reactants):
-        return "alkylation / SNAr"
-    return "other"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -133,6 +90,7 @@ def main(argv: list[str] | None = None) -> int:
         min_leaf = min(leaf_frequency.get(x, 0) for x in leaves)
         points = {
             "three_steps": int(min_depth >= 3),
+            "four_plus_steps": int(min_depth >= 4),
             "no_close_train_target": int(nn < 0.30),
             "uncommon_first_step": int(not set(families) & COMMON),
             "rare_leaf": int(min_leaf <= 5),

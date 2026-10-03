@@ -1,0 +1,237 @@
+{
+  "audit_overlap_kinds": [],
+  "composition": {
+    "dev": {
+      "depth": {
+        "2": 42,
+        "3": 42,
+        "4": 36,
+        "5": 30
+      },
+      "family": {
+        "Boc deprotection": 9,
+        "Boc protection": 8,
+        "Suzuki-type coupling": 12,
+        "alkylation / SNAr": 29,
+        "amide/ester coupling": 19,
+        "one-reactant FGI": 25,
+        "other": 18,
+        "reductive amination": 12,
+        "sulfonylation": 10,
+        "urea / carbamate": 8
+      },
+      "size": {
+        "21-30": 51,
+        "31-40": 45,
+        "41+": 12,
+        "<=20": 42
+      },
+      "stereocentres": 48,
+      "tasks": 150,
+      "two_route": 15
+    },
+    "eval": {
+      "depth": {
+        "2": 70,
+        "3": 70,
+        "4": 60,
+        "5": 50
+      },
+      "family": {
+        "Boc deprotection": 15,
+        "Boc protection": 13,
+        "Suzuki-type coupling": 20,
+        "alkylation / SNAr": 48,
+        "amide/ester coupling": 31,
+        "one-reactant FGI": 41,
+        "other": 31,
+        "reductive amination": 20,
+        "sulfonylation": 17,
+        "urea / carbamate": 14
+      },
+      "size": {
+        "21-30": 85,
+        "31-40": 75,
+        "41+": 20,
+        "<=20": 70
+      },
+      "stereocentres": 77,
+      "tasks": 250,
+      "two_route": 25
+    },
+    "stress": {
+      "depth": {
+        "2": 42,
+        "3": 42,
+        "4": 36,
+        "5": 30
+      },
+      "family": {
+        "Boc deprotection": 9,
+        "Boc protection": 8,
+        "Suzuki-type coupling": 12,
+        "alkylation / SNAr": 29,
+        "amide/ester coupling": 19,
+        "one-reactant FGI": 25,
+        "other": 18,
+        "reductive amination": 12,
+        "sulfonylation": 10,
+        "urea / carbamate": 8
+      },
+      "size": {
+        "21-30": 51,
+        "31-40": 47,
+        "41+": 17,
+        "<=20": 35
+      },
+      "stereocentres": 37,
+      "tasks": 150,
+      "two_route": 15
+    },
+    "train": {
+      "depth": {
+        "2": 13376,
+        "3": 8878,
+        "4": 3724,
+        "5": 1511
+      },
+      "family": {
+        "Boc deprotection": 591,
+        "Boc protection": 189,
+        "Suzuki-type coupling": 1426,
+        "alkylation / SNAr": 8017,
+        "amide/ester coupling": 3873,
+        "one-reactant FGI": 6658,
+        "other": 4079,
+        "reductive amination": 1529,
+        "sulfonylation": 913,
+        "urea / carbamate": 214
+      },
+      "size": {
+        "21-30": 11386,
+        "31-40": 4705,
+        "41+": 264,
+        "<=20": 11134
+      },
+      "stereocentres": 6607,
+      "tasks": 27489,
+      "two_route": 47
+    }
+  },
+  "design": {
+    "depth_shares": {
+      "2": 0.28,
+      "3": 0.28,
+      "4": 0.24,
+      "5": 0.2
+    },
+    "exact_single_ring_scaffolds": true,
+    "family_shares": {
+      "Boc deprotection": 0.0609,
+      "Boc protection": 0.0536,
+      "Suzuki-type coupling": 0.079,
+      "alkylation / SNAr": 0.1935,
+      "amide/ester coupling": 0.1246,
+      "one-reactant FGI": 0.1642,
+      "other": 0.1227,
+      "reductive amination": 0.0789,
+      "sulfonylation": 0.067,
+      "urea / carbamate": 0.0557
+    },
+    "generic_scaffold_tasks": 100,
+    "generic_scaffolds": [
+      "C1=C(c2c[nH]c3ccccc23)CCNC1",
+      "O=C(Nc1ccccc1)c1ccccc1",
+      "O=C(c1ccccc1)c1ccccc1",
+      "O=C1Cc2ccccc2N1",
+      "O=S(=O)(Nc1ccccc1)c1ccccc1",
+      "c1ccc(-c2ccccc2)cc1",
+      "c1ccc(-c2ccccn2)cc1",
+      "c1ccc(-c2cccnc2)cc1",
+      "c1ccc(-c2ccncn2)cc1",
+      "c1ccc(-n2cccn2)cc1",
+      "c1ccc(B2OCCO2)cc1",
+      "c1ccc(C2CC2)cc1",
+      "c1ccc(C2CCNCC2)cc1",
+      "c1ccc(CN2CCCCC2)cc1",
+      "c1ccc(CNc2ccccc2)cc1",
+      "c1ccc(COc2ccccc2)cc1",
+      "c1ccc(Cc2ccccc2)cc1",
+      "c1ccc(N2CCCCC2)cc1",
+      "c1ccc(N2CCNCC2)cc1",
+      "c1ccc(N2CCOCC2)cc1",
+      "c1ccc(Nc2ccccc2)cc1",
+      "c1ccc(Nc2ccncn2)cc1",
+      "c1ccc(Oc2ccccc2)cc1",
+      "c1ccc(Oc2ccccn2)cc1",
+      "c1ccc2[nH]ccc2c1",
+      "c1ccc2[nH]cnc2c1",
+      "c1ccc2[nH]ncc2c1",
+      "c1ccc2c(C3CCNCC3)c[nH]c2c1",
+      "c1ccc2c(c1)CCC2",
+      "c1ccc2ccccc2c1",
+      "c1ccc2cnccc2c1",
+      "c1ccc2ncccc2c1",
+      "c1cnc2[nH]ccc2c1"
+    ],
+    "held_out": {
+      "dev": 150,
+      "eval": 250,
+      "stress": 150
+    },
+    "held_out_independent": true,
+    "near_duplicate_threshold": 0.9,
+    "pool": ".local/pool/pool-n1-s5.jsonl",
+    "salt": "retroeval-v3",
+    "scaffold_cap_per_split": {
+      "multi_ring": 1,
+      "single_ring_or_acyclic": 2
+    },
+    "size_shares": {
+      "21-30": 0.34,
+      "31-40": 0.3,
+      "41+": 0.08,
+      "<=20": 0.28
+    },
+    "two_route_share": 0.1
+  },
+  "held_out": {
+    "dev": {
+      "filled_after_depth_only": 150,
+      "filled_after_family": 150,
+      "filled_after_family+size": 150,
+      "scaffold_cap": 57,
+      "touches_held_out_group": 61
+    },
+    "eval": {
+      "filled_after_depth_only": 250,
+      "filled_after_family": 250,
+      "filled_after_family+size": 250,
+      "scaffold_cap": 43,
+      "touches_held_out_group": 22
+    },
+    "stress": {
+      "filled_after_depth_only": 150,
+      "filled_after_family": 150,
+      "filled_after_family+size": 143,
+      "scaffold_cap": 73,
+      "touches_held_out_group": 123
+    }
+  },
+  "schema_version": "retro-benchmark-v3",
+  "source": {
+    "archive": "data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz",
+    "archive_sha256": "d504e5964af1b09632d4048f6ab81d626babc5d344dff1be00ece312716f2405",
+    "license": "CC-BY-4.0",
+    "name": "paroutes-v2-benchmark",
+    "url": "https://zenodo.org/records/7341155"
+  },
+  "stock": {
+    "id": "paroutes-v2-n1",
+    "molecules": 13432,
+    "sha256": "b8641e2028846d995953b30f7acd36e7521d0301159518d172497340a0bfb115",
+    "source_path": "data/raw/paroutes-v2-benchmark/stock_n1.txt"
+  },
+  "strict_audit_passed": true,
+  "train_skipped_touching_held_out": 9096
+}

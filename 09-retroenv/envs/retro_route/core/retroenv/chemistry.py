@@ -175,6 +175,31 @@ def scaffold_smiles(smiles: str) -> str:
     return Chem.MolToSmiles(scaffold, canonical=True, isomericSmiles=True)
 
 
+def is_single_ring_scaffold(scaffold: str) -> bool:
+    """True for acyclic keys and one-ring scaffolds (benzene, pyridine, piperidine, ...)."""
+    if scaffold.startswith("acyclic:"):
+        return True
+    mol = Chem.MolFromSmiles(scaffold)
+    return mol is not None and rdMolDescriptors.CalcNumRings(mol) == 1
+
+
+def scaffold_group_key(smiles: str, *, exact_single_ring: bool = False, generic: frozenset[str] = frozenset()) -> str:
+    """Murcko scaffold used for split grouping.
+
+    A one-ring scaffold such as benzene is shared by thousands of unrelated
+    compounds, so grouping on it merges most of a large benchmark into one
+    split. With ``exact_single_ring`` those molecules group by their exact
+    canonical structure instead, as acyclic molecules already do; Morgan
+    near-duplicate edges still catch close analogues. ``generic`` extends the
+    same rule to named multi-ring scaffolds, such as biphenyl or indole, that a
+    benchmark found in hundreds of unrelated tasks.
+    """
+    scaffold = scaffold_smiles(smiles)
+    if scaffold in generic or (exact_single_ring and is_single_ring_scaffold(scaffold)):
+        return f"exact:{canonicalize_smiles(smiles)}"
+    return scaffold
+
+
 def template_produces(
     reaction_smarts: str,
     reactants: Iterable[str],

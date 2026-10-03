@@ -11,12 +11,14 @@ from pathlib import Path
 from typing import Any, Iterable, Iterator
 
 from rdkit import Chem, DataStructs
-from rdkit.Chem import rdFingerprintGenerator, rdMolDescriptors
+from rdkit.Chem import rdFingerprintGenerator
 
-from .chemistry import (
+from .chemistry import (  # noqa: F401  (scaffold helpers are re-exported)
     canonicalize_components,
     canonicalize_smiles,
     inspect_molecule,
+    is_single_ring_scaffold,
+    scaffold_group_key,
     scaffold_smiles,
     stable_hash,
 )
@@ -375,41 +377,48 @@ def assign_strict_splits(
     }
 
 
-def is_single_ring_scaffold(scaffold: str) -> bool:
-    """True for acyclic keys and one-ring scaffolds (benzene, pyridine, piperidine, ...)."""
-    if scaffold.startswith("acyclic:"):
-        return True
-    mol = Chem.MolFromSmiles(scaffold)
-    return mol is not None and rdMolDescriptors.CalcNumRings(mol) == 1
+def split_rules(tasks_dir: str | Path) -> dict[str, Any]:
+    """The scaffold rules of the benchmark in ``tasks_dir``, from its manifest (v1's strict rule if absent)."""
+    path = Path(tasks_dir) / "manifest.json"
+    return audit_rules(json.loads(path.read_text(encoding="utf-8")) if path.exists() else {})
 
 
-def scaffold_group_key(smiles: str, *, exact_single_ring: bool = False) -> str:
-    """Murcko scaffold used for split grouping.
-
-    A one-ring scaffold such as benzene is shared by thousands of unrelated
-    compounds, so grouping on it merges most of a large benchmark into one
-    split. With ``exact_single_ring`` those molecules group by their exact
-    canonical structure instead, as acyclic molecules already do; Morgan
-    near-duplicate edges still catch close analogues.
-    """
-    scaffold = scaffold_smiles(smiles)
-    if exact_single_ring and is_single_ring_scaffold(scaffold):
-        return f"exact:{canonicalize_smiles(smiles)}"
-    return scaffold
+def audit_rules(manifest: dict[str, Any]) -> dict[str, Any]:
+    """The ``audit_splits`` scaffold rules a built benchmark's manifest records."""
+    rules = manifest.get("design") or manifest.get("selection_rules") or {}
+    return {
+        "exact_single_ring_scaffolds": bool(rules.get("exact_single_ring_scaffolds", False)),
+        "generic_scaffolds": frozenset(rules.get("generic_scaffolds", ())),
+    }
 
 
-def audit_splits(tasks: Iterable[RetroTask], *, exact_single_ring_scaffolds: bool = False) -> dict[str, Any]:
+def audit_splits(
+    tasks: Iterable[RetroTask],
+    *,
+    exact_single_ring_scaffolds: bool = False,
+    generic_scaffolds: frozenset[str] = frozenset(),
+) -> dict[str, Any]:
     by_split: dict[str, dict[str, set[str]]] = {split: defaultdict(set) for split in SPLITS}
     for task in tasks:
         bucket = by_split[task.split]
         bucket["targets"].add(canonicalize_smiles(task.target_smiles))
-        bucket["scaffolds"].add(scaffold_group_key(task.target_smiles, exact_single_ring=exact_single_ring_scaffolds))
+        bucket["scaffolds"].add(
+            scaffold_group_key(
+                task.target_smiles,
+                exact_single_ring=exact_single_ring_scaffolds,
+                generic=generic_scaffolds,
+            )
+        )
         for route in task.reference_routes:
             bucket["route_ids"].add(route.route_id)
             for step in route.steps:
                 product = canonicalize_smiles(step.product)
                 bucket["route_products"].add(product)
-                product_scaffold = scaffold_group_key(product, exact_single_ring=exact_single_ring_scaffolds)
+                product_scaffold = scaffold_group_key(
+                    product,
+                    exact_single_ring=exact_single_ring_scaffolds,
+                    generic=generic_scaffolds,
+                )
                 if product_scaffold:
                     bucket["route_product_scaffolds"].add(product_scaffold)
                 if step.reaction_id:

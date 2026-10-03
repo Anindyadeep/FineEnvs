@@ -1,0 +1,13 @@
+{
+  "schema_version": "retro-private-checksums-v1",
+  "sha256": {
+    "difficulty.jsonl": "1ab65525f49c2d5af1014f9d27ebd27fe97e3be850e814aff9b5ba5bcadf1ac9",
+    "normalized-routes.jsonl": "42fb269dbd08483cf2dbdfee816ed567ccd7d33485376ed75e05a51b8c6a742e",
+    "stocks/paroutes-v2-n1.smi": "a0505d832bccaa5ab74a259d0af1d5d1b06bc7b5a62eae9b61abbee99771f5c7",
+    "tasks-private/dev.jsonl": "30c7b591a549de1c7feec82829847173f088d98c231ef8c4a5c9039f3b4f339d",
+    "tasks-private/eval.jsonl": "0d5724525af8fa261316a478e02561dd49a01f6a516a7a13ac0c67be2be4b387",
+    "tasks-private/manifest.json": "7ac1ffff7b970e1a5e0dd1f5a16e723e4985da8ee2884f5f1bcbdebf9469f81b",
+    "tasks-private/stress.jsonl": "209171f7fcd44a89cfcef84f619413470c8f38e7727b32c7ca17b2c4f52070ce",
+    "tasks-private/train.jsonl": "5077602a71612ee576c3fab705729776817868dba06175b6f8a2cdf9203ded88"
+  }
+}
