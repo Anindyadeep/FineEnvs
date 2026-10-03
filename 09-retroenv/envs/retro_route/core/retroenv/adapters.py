@@ -14,7 +14,6 @@ from typing import Any, Iterable, Iterator
 
 from .chemistry import audit_atom_mapping
 
-
 SOURCE_META = {
     "crd": ("crd-1976-2024", "CC-BY-4.0"),
     "uspto_lowe": ("uspto-lowe-1976-2016", "CC0-1.0"),
@@ -72,9 +71,7 @@ def adapt_creed(path: Path, *, release: str = "CREED-CCV") -> Iterator[dict[str,
     for parquet_path in sorted(release_dir.glob("*.parquet")):
         parquet = pq.ParquetFile(parquet_path)
         row_offset = 0
-        for batch in parquet.iter_batches(
-            batch_size=1024, columns=["product_smiles", "reactant_candidates"]
-        ):
+        for batch in parquet.iter_batches(batch_size=1024, columns=["product_smiles", "reactant_candidates"]):
             for local_index, row in enumerate(batch.to_pylist()):
                 product_group = f"{parquet_path.name}:{row_offset + local_index}"
                 for candidate_index, candidate in enumerate(row["reactant_candidates"] or []):
@@ -126,11 +123,7 @@ def adapt_uspto_lowe(path: Path) -> Iterator[dict[str, Any]]:
                         tail = fields[reaction_index + 1 :]
                         patent = tail[0].strip() if tail else ""
                         year = next(
-                            (
-                                int(value)
-                                for value in tail
-                                if value.isdigit() and 1970 <= int(value) <= 2030
-                            ),
+                            (int(value) for value in tail if value.isdigit() and 1970 <= int(value) <= 2030),
                             None,
                         )
                         yield {
@@ -218,20 +211,14 @@ def adapt_paroutes_v2(path: Path, *, release: str = "n1") -> Iterator[dict[str, 
         def visit(molecule: dict[str, Any]) -> None:
             if molecule.get("type") != "mol" or not molecule.get("smiles"):
                 raise ValueError(f"{route_id}: malformed molecule node")
-            reactions = [
-                child for child in molecule.get("children") or []
-                if child.get("type") == "reaction"
-            ]
+            reactions = [child for child in molecule.get("children") or [] if child.get("type") == "reaction"]
             if not reactions:
                 return
             if len(reactions) != 1:
-                raise ValueError(
-                    f"{route_id}: molecule node contains {len(reactions)} reaction alternatives"
-                )
+                raise ValueError(f"{route_id}: molecule node contains {len(reactions)} reaction alternatives")
             reaction = reactions[0]
             precursors = [
-                child for child in reaction.get("children") or []
-                if child.get("type") == "mol" and child.get("smiles")
+                child for child in reaction.get("children") or [] if child.get("type") == "mol" and child.get("smiles")
             ]
             if not precursors:
                 raise ValueError(f"{route_id}: reaction has no precursor molecule nodes")
@@ -246,9 +233,7 @@ def adapt_paroutes_v2(path: Path, *, release: str = "n1") -> Iterator[dict[str, 
                     "product": str(molecule["smiles"]),
                     "reactants": [str(precursor["smiles"]) for precursor in precursors],
                     "reaction_id": str(
-                        metadata.get("reaction_hash")
-                        or metadata.get("ID")
-                        or f"{route_id}:step:{len(steps)}"
+                        metadata.get("reaction_hash") or metadata.get("ID") or f"{route_id}:step:{len(steps)}"
                     ),
                     "mapping_status": mapping_status,
                 }
@@ -304,9 +289,7 @@ def adapt_ord(path: Path) -> Iterator[dict[str, Any]]:
             if not reactants or not products:
                 continue
             patent = getattr(getattr(reaction, "provenance", None), "patent", None)
-            patent_id = _first_text_attr(
-                patent, ("document_id", "patent_number", "title")
-            )
+            patent_id = _first_text_attr(patent, ("document_id", "patent_number", "title"))
             yield {
                 "reactants": reactants,
                 "reagents": reagents,
@@ -316,7 +299,9 @@ def adapt_ord(path: Path) -> Iterator[dict[str, Any]]:
                 "source_record_id": str(getattr(reaction, "reaction_id", "") or f"{parquet_path.name}:{row_number}"),
                 "source_group_id": patent_id,
                 "evidence_kind": "observed",
-                "annotations": {"ord_dataset_file": str(parquet_path.relative_to(path) if path.is_dir() else parquet_path.name)},
+                "annotations": {
+                    "ord_dataset_file": str(parquet_path.relative_to(path) if path.is_dir() else parquet_path.name)
+                },
             }
 
 

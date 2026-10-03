@@ -17,12 +17,10 @@ from pathlib import Path
 
 from datasets import Dataset
 from peft import LoraConfig
-from trl import GRPOConfig, GRPOTrainer
-
 from retroenv.store import TaskStore
 from retroenv.training import RetroRouteTrainingEnv
 from retroenv_openenv.client import RemoteRetroRouteEnv, RetroEnvClient
-
+from trl import GRPOConfig, GRPOTrainer
 
 MODEL = os.getenv("MODEL", "Qwen/Qwen3.5-4B")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/retroenv-grpo-smoke")
@@ -50,9 +48,7 @@ def build_dataset() -> Dataset:
     return Dataset.from_list(
         [
             {
-                "prompt": [
-                    {"role": "user", "content": [{"type": "text", "text": ""}]}
-                ],
+                "prompt": [{"role": "user", "content": [{"type": "text", "text": ""}]}],
                 "split": "train",
                 "index": index,
             }

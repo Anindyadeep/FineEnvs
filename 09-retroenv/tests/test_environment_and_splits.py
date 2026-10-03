@@ -2,13 +2,12 @@ from __future__ import annotations
 
 import json
 
+from conftest import make_task
 from retroenv.environment import RetroRouteSession
 from retroenv.evaluation import evaluate
 from retroenv.models import ReactionStep, ReferenceRoute, RetroTask
 from retroenv.store import TaskStore
 from retroenv.taskgen import assign_strict_splits, audit_splits
-
-from conftest import make_task
 
 
 def test_observation_does_not_expose_references():
@@ -23,17 +22,11 @@ def test_multiturn_validation_and_submission():
     session = RetroRouteSession(max_tool_calls=4)
     session.reset(make_task(), {"CCO", "CC(=O)O"})
     assert session.inspect_molecule("CCOC(C)=O")["valid"]
-    candidate = session.propose_disconnection(
-        "CCOC(C)=O", ["CCO", "CC(=O)O"], "esterification"
-    )
+    candidate = session.propose_disconnection("CCOC(C)=O", ["CCO", "CC(=O)O"], "esterification")
     assert candidate["structurally_valid"]
-    validation = session.validate_step(
-        "CCOC(C)=O", ["CCO", "CC(=O)O"], "esterification"
-    )
+    validation = session.validate_step("CCOC(C)=O", ["CCO", "CC(=O)O"], "esterification")
     assert validation["valid"]
-    final = session.submit_route(
-        {"route": [{"product": "CCOC(C)=O", "reactants": ["CCO", "CC(=O)O"]}]}
-    )
+    final = session.submit_route({"route": [{"product": "CCOC(C)=O", "reactants": ["CCO", "CC(=O)O"]}]})
     assert final["done"] is True
     assert final["score"]["reward"] == 1.0
     assert session.submit_route({"route": []})["error"]
@@ -45,9 +38,7 @@ def test_tool_budget_cannot_be_bypassed_but_submit_remains_available():
     session.inspect_molecule("CCO")
     blocked = session.inspect_molecule("CCO")
     assert "budget exhausted" in blocked["error"]
-    final = session.submit_route(
-        {"route": [{"product": "CCOC(C)=O", "reactants": ["CCO", "CC(=O)O"]}]}
-    )
+    final = session.submit_route({"route": [{"product": "CCOC(C)=O", "reactants": ["CCO", "CC(=O)O"]}]})
     assert final["score"]["valid"] is True
 
 
@@ -95,9 +86,7 @@ def test_strict_split_keeps_routes_with_a_shared_reaction_in_one_split():
                 max_steps=1,
                 stock_id=task.stock_id,
                 split="unassigned",
-                reference_routes=(
-                    ReferenceRoute(f"route-{index}", (shared_step,), ()),
-                ),
+                reference_routes=(ReferenceRoute(f"route-{index}", (shared_step,), ()),),
             )
         )
     split, manifest = assign_strict_splits(tasks, near_duplicate_threshold=0)
@@ -160,9 +149,7 @@ def test_strict_split_keeps_shared_hidden_intermediate_in_one_split():
         ),
     )
 
-    split, manifest = assign_strict_splits(
-        [first, second], near_duplicate_threshold=0
-    )
+    split, manifest = assign_strict_splits([first, second], near_duplicate_threshold=0)
     assert len({task.split for task in split}) == 1
     assert manifest["audit"]["passed"] is True
 
@@ -194,9 +181,7 @@ def test_evaluation_keeps_missing_tasks_in_denominator(tmp_path):
     tasks_dir, stocks_dir = tmp_path / "tasks", tmp_path / "stocks"
     tasks_dir.mkdir()
     stocks_dir.mkdir()
-    (tasks_dir / "train.jsonl").write_text(
-        json.dumps(task.to_dict()) + "\n" + json.dumps(second.to_dict()) + "\n"
-    )
+    (tasks_dir / "train.jsonl").write_text(json.dumps(task.to_dict()) + "\n" + json.dumps(second.to_dict()) + "\n")
     (stocks_dir / "test_stock.smi").write_text("CCO\nCC(=O)O\n")
     result = evaluate(
         TaskStore(tasks_dir, stocks_dir),

@@ -28,8 +28,7 @@ SYSTEM_PROMPT = (
 
 # Shown on the last turn when the endpoint cannot force a tool call.
 FINAL_TURN = (
-    "This is your final turn. Call emit_routes now with the best route trees you have; "
-    "no other tool is available."
+    "This is your final turn. Call emit_routes now with the best route trees you have; no other tool is available."
 )
 
 
@@ -214,9 +213,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
                 "role": "tool",
                 "tool_call_id": call.id,
                 "name": name,
-                "content": json.dumps(
-                    {**content, "model_turns_remaining": config.max_turns - turns}, sort_keys=True
-                ),
+                "content": json.dumps({**content, "model_turns_remaining": config.max_turns - turns}, sort_keys=True),
             }
             messages.append(tool_message)
             transcript.append(tool_message)

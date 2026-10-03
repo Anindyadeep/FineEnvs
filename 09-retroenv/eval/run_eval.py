@@ -37,7 +37,6 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import httpx
-
 from retroenv_openenv import agent, agent_anthropic, agent_responses
 from retroenv_openenv.client import RetroEnvClient
 
@@ -47,14 +46,27 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     # GPT-5.6 models reject function tools with reasoning on chat completions.
     "openai": {"backend": "responses", "endpoint": "https://api.openai.com/v1", "key": "OPENAI_API_KEY"},
     "hf": {
-        "backend": "openai", "endpoint": "https://router.huggingface.co/v1", "key": "HF_TOKEN",
-        "token_param": "max_tokens", "temperature": 0.0,
+        "backend": "openai",
+        "endpoint": "https://router.huggingface.co/v1",
+        "key": "HF_TOKEN",
+        "token_param": "max_tokens",
+        "temperature": 0.0,
     },
     "openrouter": {
-        "backend": "openai", "endpoint": "https://openrouter.ai/api/v1", "key": "OPENROUTER_API_KEY",
-        "token_param": "max_tokens", "temperature": 0.0, "extra_body": {"usage": {"include": True}},
+        "backend": "openai",
+        "endpoint": "https://openrouter.ai/api/v1",
+        "key": "OPENROUTER_API_KEY",
+        "token_param": "max_tokens",
+        "temperature": 0.0,
+        "extra_body": {"usage": {"include": True}},
     },
-    "custom": {"backend": "openai", "endpoint": None, "key": "OPENAI_API_KEY", "token_param": "max_tokens", "temperature": 0.0},
+    "custom": {
+        "backend": "openai",
+        "endpoint": None,
+        "key": "OPENAI_API_KEY",
+        "token_param": "max_tokens",
+        "temperature": 0.0,
+    },
 }
 
 
@@ -84,9 +96,21 @@ def local_server(benchmark_dir: Path, toolset: str, concurrency: int, log_path: 
     log_path.parent.mkdir(parents=True, exist_ok=True)
     with log_path.open("a", encoding="utf-8") as log:
         process = subprocess.Popen(
-            [sys.executable, "-m", "uvicorn", "retroenv_openenv.server:app",
-             "--host", "127.0.0.1", "--port", str(port), "--log-level", "warning"],
-            env=environment, stdout=log, stderr=subprocess.STDOUT,
+            [
+                sys.executable,
+                "-m",
+                "uvicorn",
+                "retroenv_openenv.server:app",
+                "--host",
+                "127.0.0.1",
+                "--port",
+                str(port),
+                "--log-level",
+                "warning",
+            ],
+            env=environment,
+            stdout=log,
+            stderr=subprocess.STDOUT,
         )
         url = f"http://127.0.0.1:{port}"
         try:
@@ -162,8 +186,9 @@ def summarize(rows: list[dict[str, Any]], expected: int, attempts: int) -> dict[
     }
     if attempts > 1:
         summary["pass_at_k"] = {
-            str(k): mean([pass_at_k(len(runs), sum(r["valid"] for r in runs), k) for runs in by_task.values()
-                          if len(runs) >= k])
+            str(k): mean(
+                [pass_at_k(len(runs), sum(r["valid"] for r in runs), k) for runs in by_task.values() if len(runs) >= k]
+            )
             for k in sorted({1, attempts})
         }
     return summary
@@ -174,8 +199,11 @@ def breakdown(rows: list[dict[str, Any]], key: str, attempts: int) -> dict[str, 
     for row in rows:
         groups[str(row.get(key))].append(row)
     return {
-        name: {k: v for k, v in summarize(members, len(members), attempts).items()
-               if k in ("tasks", "pass_at_1", "exact_route_rate", "mean_reward", "mean_tool_calls")}
+        name: {
+            k: v
+            for k, v in summarize(members, len(members), attempts).items()
+            if k in ("tasks", "pass_at_1", "exact_route_rate", "mean_reward", "mean_tool_calls")
+        }
         for name, members in sorted(groups.items())
     }
 
@@ -211,8 +239,12 @@ def main() -> int:
     parser.add_argument("--api-key-env", help="environment variable holding the API key")
     parser.add_argument("--server", help="URL of a running RetroEnv server; default starts a local one")
     parser.add_argument("--benchmark-dir", type=Path, default=ROOT / "benchmark" / "retroeval-v2")
-    parser.add_argument("--toolset", choices=("full", "unaided"), default="full",
-                        help="tool surface of the local server (a remote server reports its own)")
+    parser.add_argument(
+        "--toolset",
+        choices=("full", "unaided"),
+        default="full",
+        help="tool surface of the local server (a remote server reports its own)",
+    )
     parser.add_argument("--split", default="eval")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--tasks", type=int, help="number of tasks from --start (default: the whole split)")
@@ -225,10 +257,15 @@ def main() -> int:
     parser.add_argument("--reasoning-effort", help="OpenAI-compatible reasoning_effort")
     parser.add_argument("--tool-choice", default="required", help="OpenAI-compatible tool_choice")
     parser.add_argument("--max-cost", type=float, help="stop scheduling episodes once this many USD are spent")
-    parser.add_argument("--difficulty", type=Path, help="private tier sidecar (default: <benchmark-dir>/difficulty.jsonl)")
+    parser.add_argument(
+        "--difficulty", type=Path, help="private tier sidecar (default: <benchmark-dir>/difficulty.jsonl)"
+    )
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--recompute", action="store_true",
-                        help="rebuild summary.json from the stored episodes; no provider or server calls")
+    parser.add_argument(
+        "--recompute",
+        action="store_true",
+        help="rebuild summary.json from the stored episodes; no provider or server calls",
+    )
     args = parser.parse_args()
 
     if args.recompute:
@@ -236,7 +273,9 @@ def main() -> int:
 
     preset = PROVIDERS[args.provider]
     if args.temperature is not None and preset["backend"] != "openai":
-        parser.error(f"--temperature is not supported by the {args.provider} backend; use --effort or --reasoning-effort")
+        parser.error(
+            f"--temperature is not supported by the {args.provider} backend; use --effort or --reasoning-effort"
+        )
     key_env = args.api_key_env or preset["key"]
     if not os.getenv(key_env):
         parser.error(f"{key_env} is not set")
@@ -250,7 +289,10 @@ def main() -> int:
 
         llm: Any = anthropic.Anthropic(api_key=os.environ[key_env], max_retries=4, timeout=600)
         config: Any = agent_anthropic.ClaudeConfig(
-            model=args.model, max_turns=args.max_turns, max_tokens=args.max_tokens or 16000, effort=args.effort,
+            model=args.model,
+            max_turns=args.max_turns,
+            max_tokens=args.max_tokens or 16000,
+            effort=args.effort,
         )
         backend = agent_anthropic.run_episode
         sampling = {"max_tokens": config.max_tokens, "effort": config.effort, "tool_choice": "auto"}
@@ -259,26 +301,39 @@ def main() -> int:
 
         llm = OpenAI(base_url=endpoint, api_key=os.environ[key_env], timeout=600, max_retries=4)
         config = agent_responses.ResponsesConfig(
-            model=args.model, max_turns=args.max_turns, max_output_tokens=args.max_tokens or 16000,
+            model=args.model,
+            max_turns=args.max_turns,
+            max_output_tokens=args.max_tokens or 16000,
             reasoning_effort=args.reasoning_effort,
         )
         backend = agent_responses.run_episode
-        sampling = {"max_output_tokens": config.max_output_tokens, "reasoning_effort": args.reasoning_effort,
-                    "tool_choice": "required"}
+        sampling = {
+            "max_output_tokens": config.max_output_tokens,
+            "reasoning_effort": args.reasoning_effort,
+            "tool_choice": "required",
+        }
     else:
         from openai import OpenAI
 
         llm = OpenAI(base_url=endpoint, api_key=os.environ[key_env], timeout=600, max_retries=4)
         temperature = args.temperature if args.temperature is not None else preset.get("temperature")
         config = agent.AgentConfig(
-            model=args.model, max_turns=args.max_turns, max_tokens=args.max_tokens or 4096,
-            temperature=temperature, tool_choice=args.tool_choice,
+            model=args.model,
+            max_turns=args.max_turns,
+            max_tokens=args.max_tokens or 4096,
+            temperature=temperature,
+            tool_choice=args.tool_choice,
             token_param=preset.get("token_param", "max_tokens"),
-            reasoning_effort=args.reasoning_effort, extra_body=dict(preset.get("extra_body") or {}),
+            reasoning_effort=args.reasoning_effort,
+            extra_body=dict(preset.get("extra_body") or {}),
         )
         backend = agent.run_episode
-        sampling = {"max_tokens": config.max_tokens, "temperature": temperature, "tool_choice": args.tool_choice,
-                    "reasoning_effort": args.reasoning_effort}
+        sampling = {
+            "max_tokens": config.max_tokens,
+            "temperature": temperature,
+            "tool_choice": args.tool_choice,
+            "reasoning_effort": args.reasoning_effort,
+        }
 
     difficulty_path = args.difficulty or args.benchmark_dir / "difficulty.jsonl"
     tiers = {}
@@ -286,11 +341,14 @@ def main() -> int:
         tiers = {row["task_id"]: row["tier"] for row in map(json.loads, difficulty_path.open())}
 
     output: Path = args.output
-    with (local_server(args.benchmark_dir, args.toolset, args.concurrency, output / "server.log")
-          if not args.server else _nullcontext(args.server)) as url:
+    with (
+        local_server(args.benchmark_dir, args.toolset, args.concurrency, output / "server.log")
+        if not args.server
+        else _nullcontext(args.server)
+    ) as url:
         probe = RetroEnvClient(url)
         public = probe.tasks(args.split)
-        selected = public[args.start: args.start + args.tasks if args.tasks else None]
+        selected = public[args.start : args.start + args.tasks if args.tasks else None]
         if not selected:
             parser.error("the selected task range is empty")
         opening = probe.reset(args.split, index=selected[0]["index"])
@@ -352,8 +410,9 @@ def main() -> int:
                     if spent[0] >= args.max_cost:
                         return None
             with RetroEnvClient(url) as env:
-                opening = env.reset(args.split, index=task["index"],
-                                    episode_id=f"{identity['label']}:{task['task_id']}:{attempt}")
+                opening = env.reset(
+                    args.split, index=task["index"], episode_id=f"{identity['label']}:{task['task_id']}:{attempt}"
+                )
                 if opening["task_id"] != task["task_id"]:
                     raise RuntimeError(f"server returned {opening['task_id']} for {task['task_id']}")
                 result = backend(llm, env, opening, config)
@@ -398,8 +457,11 @@ def main() -> int:
                     rows[(task["task_id"], attempt)] = row
                     done = list(rows.values())
                 write_json(output / "progress.json", summarize(done, len(jobs), args.attempts))
-                print(f"[{len(done)}/{len(jobs)}] {task['task_id']} reward={row['reward']:.3f} "
-                      f"valid={row['valid']} exact={row['exact_match']} cost=${spent[0]:.2f}", file=sys.stderr)
+                print(
+                    f"[{len(done)}/{len(jobs)}] {task['task_id']} reward={row['reward']:.3f} "
+                    f"valid={row['valid']} exact={row['exact_match']} cost=${spent[0]:.2f}",
+                    file=sys.stderr,
+                )
 
     final_rows = list(rows.values())
     summary = summarize(final_rows, len(jobs), args.attempts)
@@ -411,8 +473,15 @@ def main() -> int:
     if tiers:
         summary["by_tier"] = breakdown([r for r in final_rows if r.get("graded")], "tier", args.attempts)
     write_json(output / "summary.json", summary)
-    print(json.dumps({k: summary[k] for k in ("coverage", "pass_at_1", "pass_at_1_ci95", "exact_route_rate",
-                                              "mean_reward", "cost_usd")}, indent=2))
+    print(
+        json.dumps(
+            {
+                k: summary[k]
+                for k in ("coverage", "pass_at_1", "pass_at_1_ci95", "exact_route_rate", "mean_reward", "cost_usd")
+            },
+            indent=2,
+        )
+    )
     return 0 if summary["episodes_graded"] == len(jobs) else 2
 
 

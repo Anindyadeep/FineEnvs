@@ -36,6 +36,7 @@ PRICES = {
     "claude-fable-5": (10.00, 50.00, 1.00),
 }
 
+
 @dataclass
 class ClaudeConfig:
     model: str = "claude-opus-5-5"
@@ -122,8 +123,9 @@ def run_episode(
         for key in usage:
             usage[key] += int(getattr(response.usage, key, 0) or 0)
         messages.append({"role": "assistant", "content": response.content})
-        transcript.append({"role": "assistant", "content": [_block(b) for b in response.content],
-                           "stop_reason": response.stop_reason})
+        transcript.append(
+            {"role": "assistant", "content": [_block(b) for b in response.content], "stop_reason": response.stop_reason}
+        )
         if response.stop_reason == "refusal":
             details = getattr(response, "stop_details", None)
             errors.append(f"refusal: {getattr(details, 'category', None)}")
@@ -193,7 +195,9 @@ def run_episode(
         "turns": turns,
         "errors": errors,
         "usage": {
-            "prompt_tokens": usage["input_tokens"] + usage["cache_read_input_tokens"] + usage["cache_creation_input_tokens"],
+            "prompt_tokens": usage["input_tokens"]
+            + usage["cache_read_input_tokens"]
+            + usage["cache_creation_input_tokens"],
             "completion_tokens": usage["output_tokens"],
             **usage,
             "reported_cost_usd": round(cost, 8) if cost is not None else None,

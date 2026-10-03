@@ -27,3 +27,16 @@ retroenv-openenv = { path = "envs/retro_route/openenv", editable = true }
 testpaths = ["tests", "envs/retro_route/openenv/tests"]
 pythonpath = ["."]
 addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+extend-exclude = ["benchmark", "data", "runs", "sample", ".local"]
+
+[tool.ruff.lint]
+# Errors and unused code (ruff's defaults) plus import order.
+extend-select = ["I"]
+
+[tool.ruff.lint.per-file-ignores]
+# Pytest fixtures are imported from openenv_helpers and then taken as parameters.
+"envs/retro_route/openenv/tests/*" = ["F811"]

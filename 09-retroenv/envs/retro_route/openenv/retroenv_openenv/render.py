@@ -47,7 +47,7 @@ def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
     drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     svg = drawer.GetDrawingText()
-    return f'<span class="mol">{svg[svg.find("<svg"):]}</span>'
+    return f'<span class="mol">{svg[svg.find("<svg") :]}</span>'
 
 
 def wrap(body: str) -> str:
@@ -116,8 +116,13 @@ def score_panel(score: dict[str, Any] | None) -> str:
     )
     failures = "".join(f"<li>{html.escape(str(f))}</li>" for f in (score.get("hard_failures") or [])[:6])
     return wrap(
-        key_values([("Result", status), ("Reward", f"{score.get('reward', 0.0):.3f}"),
-                    ("Tier", html.escape(str(score.get("verification_tier"))))])
+        key_values(
+            [
+                ("Result", status),
+                ("Reward", f"{score.get('reward', 0.0):.3f}"),
+                ("Tier", html.escape(str(score.get("verification_tier")))),
+            ]
+        )
         + f"<table><thead><tr><th>Component</th><th class='num'>Score</th></tr></thead><tbody>{rows}</tbody></table>"
         + (f"<p class='muted'>Why it failed</p><ul>{failures}</ul>" if failures else "")
     )
@@ -131,4 +136,6 @@ def history_panel(history: list[dict[str, Any]]) -> str:
         f"<td class='mono'>{html.escape(item['arguments'][:120])}</td><td class='mono'>{html.escape(item['summary'][:160])}</td></tr>"
         for i, item in enumerate(history)
     )
-    return wrap(f"<table><thead><tr><th class='num'>#</th><th>Tool</th><th>Arguments</th><th>Result</th></tr></thead><tbody>{rows}</tbody></table>")
+    return wrap(
+        f"<table><thead><tr><th class='num'>#</th><th>Tool</th><th>Arguments</th><th>Result</th></tr></thead><tbody>{rows}</tbody></table>"
+    )

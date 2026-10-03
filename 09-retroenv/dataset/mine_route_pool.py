@@ -62,9 +62,7 @@ def mine(archive: Path, stock_path: Path, output: Path, max_steps: int) -> dict:
 
     connection, counters = v1._candidate_rows(roots, raw_stock, max_steps)
     by_target: dict[str, list[int]] = defaultdict(list)
-    for target, route_index in connection.execute(
-        "SELECT target, route_index FROM routes ORDER BY target, first_cut"
-    ):
+    for target, route_index in connection.execute("SELECT target, route_index FROM routes ORDER BY target, first_cut"):
         if len(by_target[target]) < 5:  # same LIMIT 5 as the v1 sampler
             by_target[target].append(int(route_index))
     connection.close()
@@ -105,13 +103,7 @@ def mine(archive: Path, stock_path: Path, output: Path, max_steps: int) -> dict:
                 counters["targets_without_verified_route"] += 1
                 continue
             leaves = sorted(
-                {
-                    x
-                    for r in references
-                    for s in r.steps
-                    for x in s.reactants
-                    if x not in {q.product for q in r.steps}
-                }
+                {x for r in references for s in r.steps for x in s.reactants if x not in {q.product for q in r.steps}}
             )
             row = {
                 "target_smiles": target,
@@ -139,7 +131,9 @@ def mine(archive: Path, stock_path: Path, output: Path, max_steps: int) -> dict:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--archive", type=Path, default=Path("data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz"))
+    parser.add_argument(
+        "--archive", type=Path, default=Path("data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz")
+    )
     parser.add_argument("--stock-file", type=Path, default=Path("data/raw/paroutes-v2-benchmark/stock_n1.txt"))
     parser.add_argument("--max-steps", type=int, default=3)
     parser.add_argument("--output", type=Path, default=Path(".local/pool/pool-n1-s3.jsonl"))

@@ -9,7 +9,6 @@ from pathlib import Path
 
 import httpx
 import pytest
-
 from retroenv_openenv.config import Resources, Settings
 
 # The committed v1 benchmark has private references, so tests can score oracles.
@@ -41,9 +40,21 @@ def _serve(extra_env: dict[str, str]):
         port = probe.getsockname()[1]
     env = {**os.environ, "RETROENV_BENCHMARK_DIR": str(BENCHMARK), "MAX_CONCURRENT_ENVS": "16", **extra_env}
     process = subprocess.Popen(
-        [sys.executable, "-m", "uvicorn", "retroenv_openenv.server:app", "--host", "127.0.0.1",
-         "--port", str(port), "--log-level", "warning"],
-        env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "retroenv_openenv.server:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+            "--log-level",
+            "warning",
+        ],
+        env=env,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
     )
     url = f"http://127.0.0.1:{port}"
     deadline = time.monotonic() + 90

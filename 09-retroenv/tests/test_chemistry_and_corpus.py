@@ -4,7 +4,7 @@ import json
 import zipfile
 
 import pytest
-
+from retroenv.adapters import adapt_crd, adapt_frea, adapt_paroutes_v2, adapt_uspto_llm
 from retroenv.chemistry import (
     ChemistryError,
     audit_atom_mapping,
@@ -12,7 +12,6 @@ from retroenv.chemistry import (
     inspect_molecule,
 )
 from retroenv.corpus import build_corpus, normalize_row
-from retroenv.adapters import adapt_crd, adapt_frea, adapt_paroutes_v2, adapt_uspto_llm
 
 
 def test_canonicalization_preserves_stereochemistry():
@@ -34,10 +33,7 @@ def test_molecule_inspection_is_deterministic():
 
 
 def test_complete_atom_mapping_is_audited():
-    reaction = (
-        "[CH3:1][CH2:2][OH:3].[CH3:4][C:5](=[O:6])[OH:7]>>"
-        "[CH3:1][CH2:2][O:3][C:5](=[O:6])[CH3:4]"
-    )
+    reaction = "[CH3:1][CH2:2][OH:3].[CH3:4][C:5](=[O:6])[OH:7]>>[CH3:1][CH2:2][O:3][C:5](=[O:6])[CH3:4]"
     audit = audit_atom_mapping(reaction)
     assert audit["status"] == "complete"
     assert audit["product_coverage"] == 1.0
@@ -99,9 +95,7 @@ def test_crd_adapter_streams_zip_rows(tmp_path):
 
 def test_frea_adapter_keeps_generated_negatives_labelled(tmp_path):
     source = tmp_path / "rxnverif_v1.0.csv"
-    source.write_text(
-        "reactants,product,method,feasible\nCCO,CC=O,positive,1\nCCN,CC=O,RR,0\n"
-    )
+    source.write_text("reactants,product,method,feasible\nCCO,CC=O,positive,1\nCCN,CC=O,RR,0\n")
     rows = list(adapt_frea(source))
     assert rows[0]["evidence_kind"] == "observed"
     assert rows[1]["evidence_kind"] == "generated"

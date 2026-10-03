@@ -18,7 +18,6 @@ from .chemistry import (
 from .graph import parse_submission
 from .models import ReactionStep, RetroTask, ScoreResult, StepValidation
 
-
 WEIGHTS = {
     "structural_validity": 0.30,
     "route_integrity": 0.25,
@@ -96,20 +95,11 @@ class RouteVerifier:
         missing_atoms = product_inventory - reactant_inventory
         checks["atom_inventory_conserved"] = not missing_atoms
         if missing_atoms:
-            rendered = ", ".join(
-                f"{element}:{count}" for element, count in sorted(missing_atoms.items())
-            )
-            errors.append(
-                "product atom inventory is not contained in the proposed reactants: "
-                + rendered
-            )
+            rendered = ", ".join(f"{element}:{count}" for element, count in sorted(missing_atoms.items()))
+            errors.append("product atom inventory is not contained in the proposed reactants: " + rendered)
 
         key = canonical_step_key(canonical_product, canonical_reactants)
-        references = [
-            step
-            for route in task.reference_routes
-            for step in route.steps
-        ]
+        references = [step for route in task.reference_routes for step in route.steps]
         exact = None
         for reference in references:
             if canonical_step_key(reference.product, reference.reactants) == key:
@@ -118,9 +108,7 @@ class RouteVerifier:
 
         support = "none"
         matched_id = None
-        atom_conservation = (
-            "element_inventory_passed" if not missing_atoms else "element_inventory_failed"
-        )
+        atom_conservation = "element_inventory_passed" if not missing_atoms else "element_inventory_failed"
         class_compatible = True
         if exact is not None:
             support = "dataset_exact"
@@ -209,15 +197,11 @@ class RouteVerifier:
                 else 0.0
             )
             stock_claim_scores.append(claim_accuracy)
-            legacy = {
-                "route": [step.to_dict(include_evidence=False) for step in tree.steps]
-            }
+            legacy = {"route": [step.to_dict(include_evidence=False) for step in tree.steps]}
             result = self.score_route(task, legacy, stock_set)
             route_results.append(result)
             step_confidences = [
-                1.0
-                if step.valid
-                else sum(step.checks.values()) / max(1, len(step.checks))
+                1.0 if step.valid else sum(step.checks.values()) / max(1, len(step.checks))
                 for step in result.step_results
             ]
             route_score = min(step_confidences) if step_confidences else 0.0
@@ -245,8 +229,7 @@ class RouteVerifier:
         )
         best_stock = max(
             (
-                0.5 * result.metrics.get("building_block_completion", 0.0)
-                + 0.5 * stock_claim_scores[index]
+                0.5 * result.metrics.get("building_block_completion", 0.0) + 0.5 * stock_claim_scores[index]
                 for index, result in enumerate(route_results)
             ),
             default=0.0,
@@ -255,9 +238,7 @@ class RouteVerifier:
             (result.metrics.get("reference_similarity", 0.0) for result in route_results),
             default=0.0,
         )
-        exact_match = any(
-            result.metrics.get("exact_reference_match", False) for result in route_results
-        )
+        exact_match = any(result.metrics.get("exact_reference_match", False) for result in route_results)
         valid_first_cuts = {
             parsed.trees[index].first_cut
             for index, result in enumerate(route_results)
@@ -265,32 +246,23 @@ class RouteVerifier:
         }
         diversity_denominator = max(1, min(task.min_routes, len(task.reference_routes)))
         diversity = min(1.0, len(valid_first_cuts) / diversity_denominator)
-        structurally_countable = all(
-            tree.root_smiles is not None and tree.molecule_validity > 0
-            for tree in parsed.trees
-        ) if parsed.trees else False
+        structurally_countable = (
+            all(tree.root_smiles is not None and tree.molecule_validity > 0 for tree in parsed.trees)
+            if parsed.trees
+            else False
+        )
         count_score = (
             1.0
             if count_in_bounds and structurally_countable
             else (
                 route_count / task.min_routes
                 if structurally_countable and route_count < task.min_routes
-                else (
-                    task.max_routes / max(route_count, 1)
-                    if structurally_countable
-                    else 0.0
-                )
+                else (task.max_routes / max(route_count, 1) if structurally_countable else 0.0)
             )
         )
-        graph_component = (
-            0.75 * (sum(graph_scores) / len(graph_scores)) + 0.25 * count_score
-            if graph_scores
-            else 0.0
-        )
+        graph_component = 0.75 * (sum(graph_scores) / len(graph_scores)) + 0.25 * count_score if graph_scores else 0.0
         molecule_component = (
-            sum(tree.molecule_validity for tree in parsed.trees) / len(parsed.trees)
-            if parsed.trees
-            else 0.0
+            sum(tree.molecule_validity for tree in parsed.trees) / len(parsed.trees) if parsed.trees else 0.0
         )
         components = {
             "parse_validity": float(parsed.parse_valid),
@@ -307,26 +279,14 @@ class RouteVerifier:
         valid_route_count = sum(result.valid for result in route_results)
         enough_valid_routes = valid_route_count >= task.min_routes
         enough_distinct_routes = len(valid_first_cuts) >= task.min_routes
-        valid = (
-            parsed.parse_valid
-            and count_in_bounds
-            and enough_valid_routes
-            and enough_distinct_routes
-        )
+        valid = parsed.parse_valid and count_in_bounds and enough_valid_routes and enough_distinct_routes
         tiers = [result.verification_tier for result in route_results if result.valid]
-        tier = (
-            "dataset_supported"
-            if "dataset_supported" in tiers
-            else ("template_supported" if tiers else "rejected")
-        )
+        tier = "dataset_supported" if "dataset_supported" in tiers else ("template_supported" if tiers else "rejected")
         failures = list(parsed.errors)
         for index, tree in enumerate(parsed.trees):
             failures.extend(f"route {index + 1}: {error}" for error in tree.errors)
         if not count_in_bounds:
-            failures.append(
-                f"submission has {route_count} routes; expected "
-                f"{task.min_routes}..{task.max_routes}"
-            )
+            failures.append(f"submission has {route_count} routes; expected {task.min_routes}..{task.max_routes}")
         if not enough_valid_routes:
             failures.append(
                 f"only {valid_route_count} submitted routes passed the chemistry verifier; "
@@ -334,8 +294,7 @@ class RouteVerifier:
             )
         if not enough_distinct_routes:
             failures.append(
-                f"only {len(valid_first_cuts)} distinct verified first cuts; "
-                f"need at least {task.min_routes}"
+                f"only {len(valid_first_cuts)} distinct verified first cuts; need at least {task.min_routes}"
             )
         metrics = {
             "route_count": route_count,
@@ -358,9 +317,7 @@ class RouteVerifier:
             hard_failures=tuple(_unique(failures)),
             components={name: round(value, 6) for name, value in components.items()},
             metrics=metrics,
-            step_results=tuple(
-                step for result in route_results for step in result.step_results
-            ),
+            step_results=tuple(step for result in route_results for step in result.step_results),
         )
 
     def score_route(
@@ -376,9 +333,7 @@ class RouteVerifier:
         if not raw_steps:
             return self._failed("route is empty")
         if len(raw_steps) > task.max_steps:
-            hard_failures.append(
-                f"route has {len(raw_steps)} steps but max_steps is {task.max_steps}"
-            )
+            hard_failures.append(f"route has {len(raw_steps)} steps but max_steps is {task.max_steps}")
 
         steps: list[ReactionStep] = []
         for index, raw in enumerate(raw_steps):
@@ -449,31 +404,16 @@ class RouteVerifier:
             hard_failures.append(f"terminal molecules are unavailable: {missing_stock}")
 
         step_results = tuple(
-            self.validate_step(
-                task, step.product, step.reactants, step.reaction_class
-            )
-            for step in steps
+            self.validate_step(task, step.product, step.reactants, step.reaction_class) for step in steps
         )
         for index, result in enumerate(step_results, 1):
             if not result.valid:
-                hard_failures.append(
-                    f"step {index} unsupported: {'; '.join(result.errors)}"
-                )
+                hard_failures.append(f"step {index} unsupported: {'; '.join(result.errors)}")
 
         hard_failures = _unique(hard_failures)
-        reference_similarity, exact_match, best_reference_steps = self._reference_match(
-            task, steps
-        )
-        step_validity = (
-            sum(result.valid for result in step_results) / len(step_results)
-            if step_results
-            else 0.0
-        )
-        stock_completion = (
-            (len(terminals) - len(missing_stock)) / len(terminals)
-            if terminals
-            else 0.0
-        )
+        reference_similarity, exact_match, best_reference_steps = self._reference_match(task, steps)
+        step_validity = sum(result.valid for result in step_results) / len(step_results) if step_results else 0.0
+        stock_completion = (len(terminals) - len(missing_stock)) / len(terminals) if terminals else 0.0
         efficiency = min(1.0, best_reference_steps / len(steps)) if steps else 0.0
         metrics = {
             "step_count": len(steps),
@@ -486,12 +426,9 @@ class RouteVerifier:
             "exact_reference_match": exact_match,
             "best_reference_steps": best_reference_steps,
             "mapping_backed_steps": sum(
-                result.atom_conservation.startswith("reference_mapping")
-                for result in step_results
+                result.atom_conservation.startswith("reference_mapping") for result in step_results
             ),
-            "template_backed_steps": sum(
-                result.support == "trusted_template" for result in step_results
-            ),
+            "template_backed_steps": sum(result.support == "trusted_template" for result in step_results),
         }
         if hard_failures:
             return ScoreResult(
@@ -527,19 +464,13 @@ class RouteVerifier:
             step_results=step_results,
         )
 
-    def _reference_match(
-        self, task: RetroTask, steps: list[ReactionStep]
-    ) -> tuple[float, bool, int]:
-        proposed = {
-            canonical_step_key(step.product, step.reactants) for step in steps
-        }
+    def _reference_match(self, task: RetroTask, steps: list[ReactionStep]) -> tuple[float, bool, int]:
+        proposed = {canonical_step_key(step.product, step.reactants) for step in steps}
         best = 0.0
         exact = False
         best_steps = min(len(route.steps) for route in task.reference_routes)
         for route in task.reference_routes:
-            reference = {
-                canonical_step_key(step.product, step.reactants) for step in route.steps
-            }
+            reference = {canonical_step_key(step.product, step.reactants) for step in route.steps}
             union = proposed | reference
             similarity = len(proposed & reference) / len(union) if union else 0.0
             if similarity > best:
@@ -564,7 +495,10 @@ class RouteVerifier:
 def _class_compatible(proposed: str | None, reference: str | None) -> bool:
     if not proposed or not reference:
         return True
-    normalize = lambda value: re.sub(r"[^a-z0-9]+", "", value.lower())
+
+    def normalize(value: str) -> str:
+        return re.sub(r"[^a-z0-9]+", "", value.lower())
+
     return normalize(proposed) == normalize(reference)
 
 

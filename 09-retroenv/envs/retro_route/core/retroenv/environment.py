@@ -10,14 +10,15 @@ from .chemistry import (
     ChemistryError,
     canonicalize_components,
     canonicalize_smiles,
-    inspect_molecule as inspect_with_rdkit,
     stable_hash,
+)
+from .chemistry import (
+    inspect_molecule as inspect_with_rdkit,
 )
 from .models import RetroTask
 from .retrieval import PrecedentIndex, StockIndex, cached_stock_index, molecule_lookup
 from .tools import ORACLE_TOOLS, tool_names
 from .verifier import RouteVerifier
-
 
 PROMPT = """Plan retrosyntheses for the target {target} in at most {max_steps} step(s).
 Return {min_routes} to {max_routes} molecule/reaction trees by calling emit_routes
@@ -155,9 +156,7 @@ class RetroRouteSession:
             return blocked
         if self.stock_index is None:  # pragma: no cover - reset contract
             raise RuntimeError("reset() must be called before stock retrieval")
-        return self.stock_index.retrieve(
-            query, mode=mode, limit=min(limit, self.max_search_results)
-        )
+        return self.stock_index.retrieve(query, mode=mode, limit=min(limit, self.max_search_results))
 
     def reaction_precedent_search(
         self,
@@ -191,9 +190,7 @@ class RetroRouteSession:
             return blocked
         try:
             product = canonicalize_smiles(product_smiles)
-            reactant_values = (
-                reactants.split(".") if isinstance(reactants, str) else reactants
-            )
+            reactant_values = reactants.split(".") if isinstance(reactants, str) else reactants
             canonical_reactants = canonicalize_components(reactant_values)
             if not canonical_reactants:
                 raise ChemistryError("a disconnection needs at least one reactant")
@@ -208,11 +205,7 @@ class RetroRouteSession:
                 "reactants": list(canonical_reactants),
                 "reaction_class": reaction_class or None,
                 "structurally_valid": not leakage,
-                "warning": (
-                    "product leakage: product is unchanged among reactants"
-                    if leakage
-                    else None
-                ),
+                "warning": ("product leakage: product is unchanged among reactants" if leakage else None),
             }
             self.candidates.append(candidate)
             return candidate
@@ -232,9 +225,7 @@ class RetroRouteSession:
             return blocked
         task = self._require_task()
         reactant_values = reactants.split(".") if isinstance(reactants, str) else reactants
-        result = self.verifier.validate_step(
-            task, product_smiles, reactant_values, reaction_class
-        ).to_dict()
+        result = self.verifier.validate_step(task, product_smiles, reactant_values, reaction_class).to_dict()
         self.validations.append(result)
         return result
 
@@ -286,9 +277,7 @@ class RetroRouteSession:
         # "supported": true or the hidden record's reagents.
         if self.reference_oracle and product_smiles and reactants:
             reactant_values = reactants.split(".") if isinstance(reactants, str) else reactants
-            validation = self.verifier.validate_step(
-                task, product_smiles, reactant_values, reaction_class or None
-            )
+            validation = self.verifier.validate_step(task, product_smiles, reactant_values, reaction_class or None)
             if validation.support != "none":
                 step = self._matched_step(validation.matched_reaction_id)
                 return {
@@ -305,11 +294,7 @@ class RetroRouteSession:
         )
         return {
             "supported": False,
-            "conditions": [
-                condition
-                for row in result["results"]
-                for condition in row.get("conditions", [])
-            ][:limit],
+            "conditions": [condition for row in result["results"] for condition in row.get("conditions", [])][:limit],
             "source": "training-visible analogues",
         }
 
@@ -330,11 +315,7 @@ class RetroRouteSession:
             reaction_class=reaction_class or None,
             limit=min(limit, self.max_search_results),
         )
-        citations = [
-            citation
-            for row in result["results"]
-            for citation in row.get("literature", [])
-        ]
+        citations = [citation for row in result["results"] for citation in row.get("literature", [])]
         return {
             "results": citations[:limit],
             "returned": min(limit, len(citations)),

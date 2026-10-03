@@ -36,7 +36,6 @@ from pathlib import Path
 import numpy as np
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
-
 from retroenv.chemistry import canonicalize_smiles, inspect_molecule, scaffold_smiles, stable_hash
 from retroenv.models import ReferenceRoute, RetroTask
 from retroenv.store import load_stock
@@ -118,8 +117,10 @@ class Groups:
 
     def admit(self, task: RetroTask, pin: str | None = None) -> bool:
         keys = group_keys(task, self.exact_single_ring)
-        products = sorted({canonicalize_smiles(s.product) for r in task.reference_routes for s in r.steps}
-                          | {canonicalize_smiles(task.target_smiles)})
+        products = sorted(
+            {canonicalize_smiles(s.product) for r in task.reference_routes for s in r.steps}
+            | {canonicalize_smiles(task.target_smiles)}
+        )
         fps = [FINGERPRINTS.GetFingerprint(Chem.MolFromSmiles(p)) for p in products]
         roots = {self.find(self.keyed[k]) for k in keys if k in self.keyed}
         near = set()
@@ -154,9 +155,19 @@ class Groups:
         return list(members.values())
 
 
-def build(pool: list[dict], v1_splits: dict[str, str], n_total: int, ratios, exact_single_ring: bool, threshold: float,
-          *, max_per_patent: int = 1, max_per_scaffold: int = 1, step_quota: bool = True,
-          fill_split: str | None = None):
+def build(
+    pool: list[dict],
+    v1_splits: dict[str, str],
+    n_total: int,
+    ratios,
+    exact_single_ring: bool,
+    threshold: float,
+    *,
+    max_per_patent: int = 1,
+    max_per_scaffold: int = 1,
+    step_quota: bool = True,
+    fill_split: str | None = None,
+):
     """Caps of 0 mean unlimited. Without the step quota, routes keep the pool's natural length mix.
 
     ``v1_splits`` maps pinned targets to their split (the v1 benchmark by default).
@@ -233,11 +244,14 @@ def build(pool: list[dict], v1_splits: dict[str, str], n_total: int, ratios, exa
         counts[split] += len(comp)
     free.sort(key=lambda c: (-len(c), stable_hash("|".join(sorted(tasks[i].task_id for i in c)), length=32)))
     for comp in free:
-        split = max(SPLITS, key=lambda name: (
-            (desired[name] - counts[name]) / max(desired[name], 1.0),
-            desired[name] - counts[name],
-            stable_hash(name + tasks[comp[0]].task_id, length=12),
-        ))
+        split = max(
+            SPLITS,
+            key=lambda name: (
+                (desired[name] - counts[name]) / max(desired[name], 1.0),
+                desired[name] - counts[name],
+                stable_hash(name + tasks[comp[0]].task_id, length=12),
+            ),
+        )
         for i in comp:
             assignment[i] = split
         counts[split] += len(comp)
@@ -257,9 +271,16 @@ def build(pool: list[dict], v1_splits: dict[str, str], n_total: int, ratios, exa
 
 def _with_split(task: RetroTask, split: str) -> RetroTask:
     return RetroTask(
-        task_id=task.task_id, mode=task.mode, target_smiles=task.target_smiles, max_steps=task.max_steps,
-        stock_id=task.stock_id, split=split, reference_routes=task.reference_routes,
-        min_routes=task.min_routes, max_routes=task.max_routes, difficulty=task.difficulty,
+        task_id=task.task_id,
+        mode=task.mode,
+        target_smiles=task.target_smiles,
+        max_steps=task.max_steps,
+        stock_id=task.stock_id,
+        split=split,
+        reference_routes=task.reference_routes,
+        min_routes=task.min_routes,
+        max_routes=task.max_routes,
+        difficulty=task.difficulty,
         schema_version=task.schema_version,
     )
 
@@ -268,11 +289,16 @@ def write_checksums(out: Path) -> None:
     """Hash the files a server must not run with silently altered: tasks and stock."""
     import hashlib
 
-    files = sorted([*out.glob("tasks-private/*.jsonl"), out / "tasks-private/manifest.json",
-                    out / "normalized-routes.jsonl", *out.glob("stocks/*.smi")])
+    files = sorted(
+        [
+            *out.glob("tasks-private/*.jsonl"),
+            out / "tasks-private/manifest.json",
+            out / "normalized-routes.jsonl",
+            *out.glob("stocks/*.smi"),
+        ]
+    )
     digests = {
-        str(path.relative_to(out)): hashlib.sha256(path.read_bytes()).hexdigest()
-        for path in files if path.exists()
+        str(path.relative_to(out)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files if path.exists()
     }
     (out / "checksums.json").write_text(
         json.dumps({"schema_version": "retro-private-checksums-v1", "sha256": digests}, indent=2) + "\n",
@@ -286,7 +312,9 @@ def write(out: Path, tasks: list[RetroTask], stock: frozenset[str], manifest: di
     for split in SPLITS:
         with (out / "tasks-public" / f"{split}.jsonl").open("w", encoding="utf-8") as handle:
             for task in sorted((t for t in tasks if t.split == split), key=lambda t: t.task_id):
-                handle.write(json.dumps(task.to_dict(include_references=False), sort_keys=True, separators=(",", ":")) + "\n")
+                handle.write(
+                    json.dumps(task.to_dict(include_references=False), sort_keys=True, separators=(",", ":")) + "\n"
+                )
     (out / "stocks").mkdir(parents=True, exist_ok=True)
     (out / "stocks" / f"{STOCK_ID}.smi").write_text("".join(f"{s}\n" for s in sorted(stock)), encoding="utf-8")
     with (out / "normalized-routes.jsonl").open("w", encoding="utf-8") as handle:
@@ -301,15 +329,20 @@ def write(out: Path, tasks: list[RetroTask], stock: frozenset[str], manifest: di
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--pool", type=Path, default=Path(".local/pool/pool-n1-s3.jsonl"))
-    parser.add_argument("--v1-dir", type=Path, default=Path("benchmark/retroeval-v1"),
-                        help="benchmark whose tasks keep their split (pinned)")
+    parser.add_argument(
+        "--v1-dir",
+        type=Path,
+        default=Path("benchmark/retroeval-v1"),
+        help="benchmark whose tasks keep their split (pinned)",
+    )
     parser.add_argument("--fill-split", choices=SPLITS, help="pin every new task to this split")
     parser.add_argument("--stock-file", type=Path, default=Path("data/raw/paroutes-v2-benchmark/stock_n1.txt"))
     parser.add_argument("--output-dir", type=Path, default=Path(".local/retroeval-v2"))
     parser.add_argument("--tasks", type=int, default=1000)
     parser.add_argument("--ratios", nargs=4, type=float, default=(0.6, 0.1, 0.15, 0.15))
-    parser.add_argument("--strict-scaffolds", action="store_true",
-                        help="v1 rule: group on every Murcko scaffold, including benzene")
+    parser.add_argument(
+        "--strict-scaffolds", action="store_true", help="v1 rule: group on every Murcko scaffold, including benzene"
+    )
     parser.add_argument("--near-duplicate-threshold", type=float, default=0.90)
     parser.add_argument("--max-per-patent", type=int, default=1, help="0 = unlimited")
     parser.add_argument("--max-per-scaffold", type=int, default=1, help="multi-ring scaffolds; 0 = unlimited")
@@ -322,28 +355,52 @@ def main(argv: list[str] | None = None) -> int:
     for split in SPLITS:
         for line in (args.v1_dir / "tasks-private" / f"{split}.jsonl").open(encoding="utf-8"):
             v1_splits[json.loads(line)["target_smiles"]] = split
-    tasks, counters, info = build(pool, v1_splits, args.tasks, tuple(args.ratios),
-                                  not args.strict_scaffolds, args.near_duplicate_threshold,
-                                  max_per_patent=args.max_per_patent, max_per_scaffold=args.max_per_scaffold,
-                                  step_quota=not args.no_step_quota, fill_split=args.fill_split)
+    tasks, counters, info = build(
+        pool,
+        v1_splits,
+        args.tasks,
+        tuple(args.ratios),
+        not args.strict_scaffolds,
+        args.near_duplicate_threshold,
+        max_per_patent=args.max_per_patent,
+        max_per_scaffold=args.max_per_scaffold,
+        step_quota=not args.no_step_quota,
+        fill_split=args.fill_split,
+    )
     audit = audit_splits(tasks, exact_single_ring_scaffolds=not args.strict_scaffolds)
-    report = {"selection": dict(sorted(counters.items())), "split": info,
-              "strict_audit_passed": audit["passed"], "audit_overlap_kinds": sorted({o["kind"] for o in audit["overlaps"]})}
+    report = {
+        "selection": dict(sorted(counters.items())),
+        "split": info,
+        "strict_audit_passed": audit["passed"],
+        "audit_overlap_kinds": sorted({o["kind"] for o in audit["overlaps"]}),
+    }
     print(json.dumps(report, indent=2))
     if args.dry_run:
         return 0
     stock = load_stock(args.stock_file)
     manifest = {
         "schema_version": "retro-benchmark-v2-draft",
-        "source": {"name": "paroutes-v2-benchmark", "license": "CC-BY-4.0", "url": "https://zenodo.org/records/7341155",
-                   "archive": "data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz",
-                   "archive_sha256": "d504e5964af1b09632d4048f6ab81d626babc5d344dff1be00ece312716f2405"},
-        "stock": {"id": STOCK_ID, "molecules": len(stock), "source_path": str(args.stock_file),
-                  "sha256": "b8641e2028846d995953b30f7acd36e7521d0301159518d172497340a0bfb115"},
+        "source": {
+            "name": "paroutes-v2-benchmark",
+            "license": "CC-BY-4.0",
+            "url": "https://zenodo.org/records/7341155",
+            "archive": "data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz",
+            "archive_sha256": "d504e5964af1b09632d4048f6ab81d626babc5d344dff1be00ece312716f2405",
+        },
+        "stock": {
+            "id": STOCK_ID,
+            "molecules": len(stock),
+            "source_path": str(args.stock_file),
+            "sha256": "b8641e2028846d995953b30f7acd36e7521d0301159518d172497340a0bfb115",
+        },
         "selection_rules": {
-            "pool": str(args.pool), "exclude_target_in_stock": True, 
-            "max_per_patent": args.max_per_patent, "multi_ring_scaffold_cap": args.max_per_scaffold, "single_ring_or_acyclic_scaffold_cap": "pool share x tasks",
-            "single_route_step_shares": None if args.no_step_quota else {"2": 0.5, "3": 0.5}, "v1_tasks_pinned_to_v1_split": True,
+            "pool": str(args.pool),
+            "exclude_target_in_stock": True,
+            "max_per_patent": args.max_per_patent,
+            "multi_ring_scaffold_cap": args.max_per_scaffold,
+            "single_ring_or_acyclic_scaffold_cap": "pool share x tasks",
+            "single_route_step_shares": None if args.no_step_quota else {"2": 0.5, "3": 0.5},
+            "v1_tasks_pinned_to_v1_split": True,
             "exact_single_ring_scaffolds": not args.strict_scaffolds,
             "near_duplicate_threshold": args.near_duplicate_threshold,
         },

@@ -11,14 +11,12 @@ from typing import Any, Iterable
 
 from rdkit import Chem, DataStructs
 from rdkit.Chem import rdFingerprintGenerator
-
 from retroenv.environment import RetroRouteSession
 from retroenv.graph import routes_to_submission
 from retroenv.retrieval import PrecedentIndex
 from retroenv.store import TaskStore
 from retroenv.taskgen import SPLITS, audit_splits
 from retroenv.verifier import RouteVerifier
-
 
 PRIVATE_ONLY_KEYS = {
     "reference_routes",
@@ -60,19 +58,11 @@ def _cross_split_near_duplicates(tasks: Iterable[Any], threshold: float) -> list
     values = list(tasks)
     generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
     products = [
-        sorted(
-            {
-                step.product
-                for route in task.reference_routes
-                for step in route.steps
-            }
-            | {task.target_smiles}
-        )
+        sorted({step.product for route in task.reference_routes for step in route.steps} | {task.target_smiles})
         for task in values
     ]
     fingerprints = [
-        [generator.GetFingerprint(Chem.MolFromSmiles(smiles)) for smiles in task_products]
-        for task_products in products
+        [generator.GetFingerprint(Chem.MolFromSmiles(smiles)) for smiles in task_products] for task_products in products
     ]
     overlaps: list[dict[str, Any]] = []
     for right in range(1, len(values)):
@@ -81,9 +71,7 @@ def _cross_split_near_duplicates(tasks: Iterable[Any], threshold: float) -> list
                 continue
             best = (0.0, "", "")
             for right_index, right_fp in enumerate(fingerprints[right]):
-                similarities = DataStructs.BulkTanimotoSimilarity(
-                    right_fp, fingerprints[left]
-                )
+                similarities = DataStructs.BulkTanimotoSimilarity(right_fp, fingerprints[left])
                 for left_index, similarity in enumerate(similarities):
                     if similarity > best[0]:
                         best = (
@@ -122,19 +110,14 @@ def audit(
     failures: list[str] = []
     counts = {split: len(store.tasks(split)) for split in SPLITS}
     if counts["eval"] != expected_eval_tasks:
-        failures.append(
-            f"eval contains {counts['eval']} tasks, expected {expected_eval_tasks}"
-        )
+        failures.append(f"eval contains {counts['eval']} tasks, expected {expected_eval_tasks}")
 
     split_audit = audit_splits(tasks, exact_single_ring_scaffolds=exact_single_ring_scaffolds)
     if not split_audit["passed"]:
         failures.append("exact target/scaffold/route/reaction/source split leakage")
     near_duplicates = _cross_split_near_duplicates(tasks, threshold)
     if near_duplicates:
-        failures.append(
-            f"{len(near_duplicates)} cross-split route-product pairs have "
-            f"Tanimoto >= {threshold}"
-        )
+        failures.append(f"{len(near_duplicates)} cross-split route-product pairs have Tanimoto >= {threshold}")
 
     private_by_id = {task.task_id: task for task in tasks}
     public_rows: list[dict[str, Any]] = []
@@ -148,9 +131,7 @@ def audit(
         for row in rows:
             leaked = _find_private_keys(row)
             if leaked:
-                failures.append(
-                    f"{split}/{row.get('task_id')}: public keys leak at {leaked[:3]}"
-                )
+                failures.append(f"{split}/{row.get('task_id')}: public keys leak at {leaked[:3]}")
             task = private_by_id.get(str(row.get("task_id", "")))
             if task and row != task.to_dict(include_references=False):
                 failures.append(f"{split}/{task.task_id}: public task does not match private shell")
@@ -163,24 +144,17 @@ def audit(
         stock = store.stock(task.stock_id)
         reference_routes += len(task.reference_routes)
         reference_steps += sum(len(route.steps) for route in task.reference_routes)
-        first_cuts = {
-            tuple(sorted(route.steps[0].reactants))
-            for route in task.reference_routes
-            if route.steps
-        }
+        first_cuts = {tuple(sorted(route.steps[0].reactants)) for route in task.reference_routes if route.steps}
         if not task.min_routes <= len(task.reference_routes) <= task.max_routes:
             failures.append(
-                f"{task.task_id}: {len(task.reference_routes)} references outside "
-                f"{task.min_routes}..{task.max_routes}"
+                f"{task.task_id}: {len(task.reference_routes)} references outside {task.min_routes}..{task.max_routes}"
             )
         if len(first_cuts) < task.min_routes:
             failures.append(f"{task.task_id}: insufficient distinct reference first cuts")
         if any(not 1 <= len(route.steps) <= task.max_steps for route in task.reference_routes):
             failures.append(f"{task.task_id}: reference route violates step cap")
         for route in task.reference_routes:
-            submission = {
-                "route": [step.to_dict(include_evidence=False) for step in route.steps]
-            }
+            submission = {"route": [step.to_dict(include_evidence=False) for step in route.steps]}
             if not verifier.score_route(task, submission, stock).valid:
                 route_failures += 1
         oracle = routes_to_submission(
@@ -198,23 +172,15 @@ def audit(
         failures.append(f"{oracle_failures} tasks fail graph oracle replay")
 
     train_index = PrecedentIndex(store.tasks("train"))
-    non_train_ids = {
-        task.task_id for split in ("dev", "eval", "stress") for task in store.tasks(split)
-    }
-    leaked_precedents = sorted(
-        {record.task_id for record in train_index.records} & non_train_ids
-    )
+    non_train_ids = {task.task_id for split in ("dev", "eval", "stress") for task in store.tasks(split)}
+    leaked_precedents = sorted({record.task_id for record in train_index.records} & non_train_ids)
     if leaked_precedents:
         failures.append(f"precedent index contains non-train task IDs: {leaked_precedents[:3]}")
 
     eval_task = store.tasks("eval")[0]
     session = RetroRouteSession(precedent_index=train_index)
-    opening_a = session.reset(
-        eval_task, store.stock(eval_task.stock_id), episode_id="determinism-audit"
-    )
-    opening_b = session.reset(
-        eval_task, store.stock(eval_task.stock_id), episode_id="determinism-audit"
-    )
+    opening_a = session.reset(eval_task, store.stock(eval_task.stock_id), episode_id="determinism-audit")
+    opening_b = session.reset(eval_task, store.stock(eval_task.stock_id), episode_id="determinism-audit")
     if opening_a != opening_b:
         failures.append("session reset is not deterministic with a fixed episode ID")
     leaked_opening = _find_private_keys(opening_a)

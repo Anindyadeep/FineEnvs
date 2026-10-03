@@ -3,9 +3,9 @@ from __future__ import annotations
 import copy
 
 import pytest
-
 from retroenv.chemistry import canonical_step_key, canonicalize_smiles
 from retroenv.store import TaskStore
+
 from v2.run_pilot import BENCHMARK, TASK_INDICES, parse_graph_argument
 from v2.verifier import verify_graph
 
@@ -54,11 +54,7 @@ def _oracle_graph(task, stock):
     for route_index, route in enumerate(task.reference_routes[:2], 1):
         reaction_ids = []
         route_products = {canonicalize_smiles(step.product) for step in route.steps}
-        route_reactants = {
-            canonicalize_smiles(reactant)
-            for step in route.steps
-            for reactant in step.reactants
-        }
+        route_reactants = {canonicalize_smiles(reactant) for step in route.steps for reactant in step.reactants}
         for step in route.steps:
             product = canonicalize_smiles(step.product)
             reactants = tuple(sorted(canonicalize_smiles(item) for item in step.reactants))
@@ -68,9 +64,7 @@ def _oracle_graph(task, stock):
                 reaction_id = f"r{len(reactions) + 1}"
                 reactions[key] = reaction_id
                 arguments = {"product_smiles": product, "reactants": list(reactants)}
-                validation_id = add_evidence(
-                    "validate_disconnection", arguments, {"valid": True}
-                )
+                validation_id = add_evidence("validate_disconnection", arguments, {"valid": True})
                 class_id = add_evidence(
                     "reaction_class_lookup",
                     arguments,

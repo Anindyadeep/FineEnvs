@@ -13,7 +13,6 @@ from .environment import RetroRouteSession
 from .retrieval import PrecedentIndex
 from .store import TaskStore
 
-
 _TRACE_LOCK = threading.Lock()
 
 
@@ -41,21 +40,18 @@ class RetroRouteTrainingEnv:
         trace_path: str | Path | None = None,
     ):
         root = Path(__file__).resolve().parents[2]
-        task_path = str(
-            tasks_dir or os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private")
-        )
-        stock_path = str(
-            stocks_dir or os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks")
-        )
+        task_path = str(tasks_dir or os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"))
+        stock_path = str(stocks_dir or os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"))
         self.store, precedent_index = _resources(task_path, stock_path)
         self.session = RetroRouteSession(
-            max_tool_calls=max_tool_calls
-            or int(os.getenv("RETROENV_MAX_TOOL_CALLS", "32")),
+            max_tool_calls=max_tool_calls or int(os.getenv("RETROENV_MAX_TOOL_CALLS", "32")),
             precedent_index=precedent_index,
         )
-        self.trace_path = Path(
-            trace_path or os.getenv("RETROENV_TRACE_PATH", "")
-        ) if (trace_path or os.getenv("RETROENV_TRACE_PATH")) else None
+        self.trace_path = (
+            Path(trace_path or os.getenv("RETROENV_TRACE_PATH", ""))
+            if (trace_path or os.getenv("RETROENV_TRACE_PATH"))
+            else None
+        )
         self._task: dict[str, Any] = {}
         self._trace: list[dict[str, Any]] = []
 
@@ -90,9 +86,7 @@ class RetroRouteTrainingEnv:
         """Canonicalize SMILES using the deterministic local molecule resolver."""
         return self._call("pubchem_lookup", query=query)
 
-    def stock_retrieve(
-        self, query: str, mode: str = "auto", limit: int = 10
-    ) -> list[dict[str, str]]:
+    def stock_retrieve(self, query: str, mode: str = "auto", limit: int = 10) -> list[dict[str, str]]:
         """Search the selected stock, returning at most 20 candidates."""
         return self._call("stock_retrieve", query=query, mode=mode, limit=limit)
 
@@ -121,9 +115,7 @@ class RetroRouteTrainingEnv:
             reaction_class=reaction_class or None,
         )
 
-    def reaction_class_lookup(
-        self, product_smiles: str, reactants: list[str]
-    ) -> list[dict[str, str]]:
+    def reaction_class_lookup(self, product_smiles: str, reactants: list[str]) -> list[dict[str, str]]:
         """Name the class of a supported, supplied cut."""
         return self._call(
             "reaction_class_lookup",

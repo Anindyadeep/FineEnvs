@@ -35,15 +35,27 @@ def _arguments_template(tool: str, target: str) -> dict[str, Any]:
 
 def _submission_template(target: str) -> dict[str, Any]:
     return {
-        "routes": [{
-            "type": "mol", "smiles": target, "in_stock": False,
-            "children": [{
-                "type": "reaction", "is_reaction": True,
-                "metadata": {"explanation": "", "reaction_class": "", "confidence": 0.5,
-                             "literature": [], "precursor_roles": {}},
-                "children": [{"type": "mol", "smiles": "REACTANT_SMILES", "in_stock": True, "children": []}],
-            }],
-        }]
+        "routes": [
+            {
+                "type": "mol",
+                "smiles": target,
+                "in_stock": False,
+                "children": [
+                    {
+                        "type": "reaction",
+                        "is_reaction": True,
+                        "metadata": {
+                            "explanation": "",
+                            "reaction_class": "",
+                            "confidence": 0.5,
+                            "literature": [],
+                            "precursor_roles": {},
+                        },
+                        "children": [{"type": "mol", "smiles": "REACTANT_SMILES", "in_stock": True, "children": []}],
+                    }
+                ],
+            }
+        ]
     }
 
 
@@ -94,8 +106,9 @@ class PlaygroundSession:
             observation = self.env.step(CallToolAction(tool_name=tool, arguments=arguments))
             error = getattr(observation, "error", None)
             result = {"error": error.message} if error else _tool_payload(observation.result)
-            self.history.append({"tool": tool, "arguments": json.dumps(arguments, sort_keys=True),
-                                 "summary": _summary(result)})
+            self.history.append(
+                {"tool": tool, "arguments": json.dumps(arguments, sort_keys=True), "summary": _summary(result)}
+            )
             if tool == "emit_routes" and isinstance(result, dict) and result.get("score"):
                 self.submission, self.score = arguments.get("submission"), result["score"]
             return result
@@ -108,8 +121,11 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
 
     def task_choices(split: str) -> list[tuple[str, int]]:
         return [
-            (f"{i:03d} · {task.max_steps} steps · {task.min_routes} route{'s' if task.min_routes > 1 else ''} · "
-             f"{task.target_smiles[:48]}", i)
+            (
+                f"{i:03d} · {task.max_steps} steps · {task.min_routes} route{'s' if task.min_routes > 1 else ''} · "
+                f"{task.target_smiles[:48]}",
+                i,
+            )
             for i, task in enumerate(store.tasks(split))
         ]
 
@@ -119,16 +135,24 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
 
     def panels(session: PlaygroundSession) -> tuple[str, str, str, str]:
         state = session.env.state if session.env else None
-        return (render.target_panel(session.opening, state), render.history_panel(session.history),
-                render.score_panel(session.score), render.routes_panel(session.submission))
+        return (
+            render.target_panel(session.opening, state),
+            render.history_panel(session.history),
+            render.score_panel(session.score),
+            render.routes_panel(session.submission),
+        )
 
     with gr.Blocks(title="RetroEnv") as demo:
         session = gr.State(PlaygroundSession())
-        gr.HTML(render.STYLE + render.wrap(
-            "<h2 style='margin:0'>RetroEnv</h2><p class='muted' style='margin:2px 0 0'>Plan routes back to "
-            "purchasable molecules. These are the tools and the verifier that agents use. "
-            "API: <a href='/docs'>/docs</a> · tasks: <a href='/retro_route/splits'>/retro_route/splits</a></p>"),
-            apply_default_css=False)
+        gr.HTML(
+            render.STYLE
+            + render.wrap(
+                "<h2 style='margin:0'>RetroEnv</h2><p class='muted' style='margin:2px 0 0'>Plan routes back to "
+                "purchasable molecules. These are the tools and the verifier that agents use. "
+                "API: <a href='/docs'>/docs</a> · tasks: <a href='/retro_route/splits'>/retro_route/splits</a></p>"
+            ),
+            apply_default_css=False,
+        )
         with gr.Row(equal_height=False):
             with gr.Column(scale=4, min_width=320):
                 split = gr.Dropdown(splits, value=default_split, label="Split")
@@ -157,9 +181,14 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             names = tool_names(state)
             target_smiles = state.opening["target_smiles"]
             first = names[0] if names else None
-            return (state, *panels(state), gr.update(choices=names, value=first),
-                    json.dumps(_arguments_template(first, target_smiles), indent=2) if first else "{}", "",
-                    json.dumps(_submission_template(target_smiles), indent=2))
+            return (
+                state,
+                *panels(state),
+                gr.update(choices=names, value=first),
+                json.dumps(_arguments_template(first, target_smiles), indent=2) if first else "{}",
+                "",
+                json.dumps(_submission_template(target_smiles), indent=2),
+            )
 
         def on_tool(state: PlaygroundSession, name: str):
             if not state.opening or not name:
@@ -183,8 +212,11 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             return (state, *panels(state))
 
         split.change(on_split, split, task)
-        start.click(on_start, [session, split, task],
-                    [session, target, history, score, routes, tool, arguments, result, submission])
+        start.click(
+            on_start,
+            [session, split, task],
+            [session, target, history, score, routes, tool, arguments, result, submission],
+        )
         tool.change(on_tool, [session, tool], arguments)
         run.click(on_run, [session, tool, arguments], [session, result, target, history, score, routes])
         emit.click(on_emit, [session, submission], [session, target, history, score, routes])

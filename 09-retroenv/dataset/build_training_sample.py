@@ -33,7 +33,6 @@ from retroenv.store import load_stock
 from retroenv.taskgen import assign_strict_splits, write_tasks
 from retroenv.verifier import RouteVerifier
 
-
 SOURCE_NAME = "paroutes-v2-benchmark"
 SOURCE_LICENSE = "CC-BY-4.0"
 SOURCE_URL = "https://zenodo.org/records/7341155"
@@ -47,9 +46,7 @@ def _sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
-def _raw_descriptor(
-    root: Any, raw_stock: set[str], max_steps: int
-) -> tuple[str, str, int] | None:
+def _raw_descriptor(root: Any, raw_stock: set[str], max_steps: int) -> tuple[str, str, int] | None:
     """Cheap shape/stock pass before applying RDKit to selected records."""
     if not isinstance(root, dict) or root.get("type") != "mol" or not root.get("smiles"):
         return None
@@ -69,9 +66,7 @@ def _raw_descriptor(
             valid = False
             return
         precursors = [
-            child
-            for child in reactions[0].get("children") or []
-            if child.get("type") == "mol" and child.get("smiles")
+            child for child in reactions[0].get("children") or [] if child.get("type") == "mol" and child.get("smiles")
         ]
         if not precursors:
             valid = False
@@ -96,16 +91,12 @@ def _extract_reference(root: dict[str, Any], route_index: int) -> ReferenceRoute
     patent_ids: set[str] = set()
 
     def visit(molecule: dict[str, Any], path: str) -> None:
-        reactions = [
-            child for child in molecule.get("children") or []
-            if child.get("type") == "reaction"
-        ]
+        reactions = [child for child in molecule.get("children") or [] if child.get("type") == "reaction"]
         if not reactions:
             return
         reaction = reactions[0]
         precursors = [
-            child for child in reaction.get("children") or []
-            if child.get("type") == "mol" and child.get("smiles")
+            child for child in reaction.get("children") or [] if child.get("type") == "mol" and child.get("smiles")
         ]
         metadata = reaction.get("metadata") or {}
         raw_id = str(metadata.get("ID") or "")
@@ -125,13 +116,9 @@ def _extract_reference(root: dict[str, Any], route_index: int) -> ReferenceRoute
         steps.append(
             ReactionStep(
                 product=canonicalize_smiles(str(molecule["smiles"])),
-                reactants=canonicalize_components(
-                    str(precursor["smiles"]) for precursor in precursors
-                ),
+                reactants=canonicalize_components(str(precursor["smiles"]) for precursor in precursors),
                 reaction_id=str(
-                    metadata.get("reaction_hash")
-                    or metadata.get("ID")
-                    or f"paroutes-all:{route_index}:{path}"
+                    metadata.get("reaction_hash") or metadata.get("ID") or f"paroutes-all:{route_index}:{path}"
                 ),
                 mapping_status=mapping_status,
                 conditions=(condition,) if condition else (),
@@ -164,9 +151,7 @@ def _extract_reference(root: dict[str, Any], route_index: int) -> ReferenceRoute
         }
         for group in groups
     )
-    return ReferenceRoute(
-        route_id=f"paroutes-all:{route_index}", steps=tuple(steps), source=source
-    )
+    return ReferenceRoute(route_id=f"paroutes-all:{route_index}", steps=tuple(steps), source=source)
 
 
 def _candidate_rows(
@@ -274,16 +259,12 @@ def build_sample(
                 split="unassigned",
                 reference_routes=(reference,),
             )
-            flat_route = {
-                "route": [step.to_dict(include_evidence=False) for step in reference.steps]
-            }
+            flat_route = {"route": [step.to_dict(include_evidence=False) for step in reference.steps]}
             if verifier.score_route(replay_task, flat_route, stock).valid:
                 references.append(reference)
             else:
                 counters["selected_verifier_rejected"] += 1
-        first_cuts = {
-            tuple(sorted(route.steps[0].reactants)) for route in references if route.steps
-        }
+        first_cuts = {tuple(sorted(route.steps[0].reactants)) for route in references if route.steps}
         if len(references) < 2 or len(first_cuts) < 2:
             counters["selected_insufficient_verified_alternatives"] += 1
             continue
@@ -320,10 +301,7 @@ def build_sample(
 
     connection.close()
     if len(tasks) < sample_size:
-        raise RuntimeError(
-            f"only {len(tasks)} verified alternate-route tasks were found; "
-            f"requested {sample_size}"
-        )
+        raise RuntimeError(f"only {len(tasks)} verified alternate-route tasks were found; requested {sample_size}")
     split_tasks, split_manifest = assign_strict_splits(
         tasks,
         ratios=ratios,
@@ -351,8 +329,7 @@ def build_sample(
             "sample_size": sample_size,
             "max_steps": max_steps,
             "requested_split_ratios": {
-                split: ratio
-                for split, ratio in zip(("train", "dev", "eval", "stress"), ratios)
+                split: ratio for split, ratio in zip(("train", "dev", "eval", "stress"), ratios)
             },
             "requires_distinct_first_cuts": True,
             "requires_exact_stock_closure": True,
@@ -378,15 +355,11 @@ def build_sample(
                     + "\n"
                 )
     stocks_dir.mkdir(parents=True, exist_ok=True)
-    (stocks_dir / "paroutes-v2-n1.smi").write_text(
-        "".join(f"{smiles}\n" for smiles in sorted(stock)), encoding="utf-8"
-    )
+    (stocks_dir / "paroutes-v2-n1.smi").write_text("".join(f"{smiles}\n" for smiles in sorted(stock)), encoding="utf-8")
     with (output_dir / "normalized-routes.jsonl").open("w", encoding="utf-8") as handle:
         for row in sorted(normalized_routes, key=lambda value: value["route_id"]):
             handle.write(json.dumps(row, sort_keys=True, separators=(",", ":")) + "\n")
-    (output_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return manifest
 
 

@@ -26,11 +26,7 @@ def evaluate(
     unknown_splits = sorted(set(selected_splits) - set(store.splits()))
     if unknown_splits:
         raise ValueError(f"unknown evaluation split(s): {unknown_splits}")
-    tasks = {
-        task.task_id: task
-        for split in selected_splits
-        for task in store.tasks(split)
-    }
+    tasks = {task.task_id: task for split in selected_splits for task in store.tasks(split)}
     predictions: dict[str, list[dict[str, Any]]] = defaultdict(list)
     duplicate_rows: list[str] = []
     for row in prediction_rows:
@@ -64,9 +60,7 @@ def evaluate(
                 # Keep the v0 flat-route prediction format readable so old
                 # experiment artifacts remain evaluable.
                 route = attempt.get("route", attempt)
-                if isinstance(route, dict) and (
-                    "routes" in route or route.get("type") == "mol"
-                ):
+                if isinstance(route, dict) and ("routes" in route or route.get("type") == "mol"):
                     result = verifier.score_submission(task, route, stock)
                 else:
                     result = verifier.score_route(task, route, stock)
@@ -82,24 +76,16 @@ def evaluate(
     total = len(episodes)
     pass_at = {
         f"pass@{k}": (
-            sum(any(item["score"].valid for item in episode["attempts"][:k]) for episode in episodes)
-            / total
+            sum(any(item["score"].valid for item in episode["attempts"][:k]) for episode in episodes) / total
             if total
             else 0.0
         )
         for k in ks
     }
     pass_counts = {
-        k: sum(
-            any(item["score"].valid for item in episode["attempts"][:k])
-            for episode in episodes
-        )
-        for k in ks
+        k: sum(any(item["score"].valid for item in episode["attempts"][:k]) for episode in episodes) for k in ks
     }
-    first_results = [
-        episode["attempts"][0]["score"] if episode["attempts"] else None
-        for episode in episodes
-    ]
+    first_results = [episode["attempts"][0]["score"] if episode["attempts"] else None for episode in episodes]
     all_attempts = [item for episode in episodes for item in episode["attempts"]]
     successful = [item for item in all_attempts if item["score"].valid]
     tool_calls_success = [item["tool_calls"] for item in successful if item["tool_calls"] > 0]
@@ -111,64 +97,40 @@ def evaluate(
         "tasks": total,
         "tasks_with_predictions": sum(bool(episode["attempts"]) for episode in episodes),
         **{key: round(value, 6) for key, value in pass_at.items()},
-        "pass_ci95": {
-            f"pass@{k}": _wilson_interval(pass_counts[k], total) for k in ks
-        },
-        "top1_route_validity": _mean(
-            float(score.valid) if score is not None else 0.0 for score in first_results
-        ),
-        "top1_reward": _mean(
-            score.reward if score is not None else 0.0 for score in first_results
-        ),
+        "pass_ci95": {f"pass@{k}": _wilson_interval(pass_counts[k], total) for k in ks},
+        "top1_route_validity": _mean(float(score.valid) if score is not None else 0.0 for score in first_results),
+        "top1_reward": _mean(score.reward if score is not None else 0.0 for score in first_results),
         "top1_parse_validity": _mean(
-            score.components.get("parse_validity", float(score.valid))
-            if score is not None
-            else 0.0
+            score.components.get("parse_validity", float(score.valid)) if score is not None else 0.0
             for score in first_results
         ),
         "top1_molecule_validity": _mean(
-            score.metrics.get("molecule_validity", float(score.valid))
-            if score is not None
-            else 0.0
+            score.metrics.get("molecule_validity", float(score.valid)) if score is not None else 0.0
             for score in first_results
         ),
         "top1_graph_validity": _mean(
-            score.metrics.get("graph_validity", float(score.valid))
-            if score is not None
-            else 0.0
+            score.metrics.get("graph_validity", float(score.valid)) if score is not None else 0.0
             for score in first_results
         ),
         "top1_step_validity": _mean(
-            score.metrics.get("step_validity", 0.0) if score is not None else 0.0
-            for score in first_results
+            score.metrics.get("step_validity", 0.0) if score is not None else 0.0 for score in first_results
         ),
         "top1_reference_similarity": _mean(
-            score.metrics.get("reference_similarity", 0.0) if score is not None else 0.0
-            for score in first_results
+            score.metrics.get("reference_similarity", 0.0) if score is not None else 0.0 for score in first_results
         ),
         "top1_building_block_completion": _mean(
-            score.metrics.get("building_block_completion", 0.0) if score is not None else 0.0
-            for score in first_results
+            score.metrics.get("building_block_completion", 0.0) if score is not None else 0.0 for score in first_results
         ),
         "top1_exact_reference_match": _mean(
-            float(score.metrics.get("exact_reference_match", False))
-            if score is not None
-            else 0.0
+            float(score.metrics.get("exact_reference_match", False)) if score is not None else 0.0
             for score in first_results
         ),
         "top1_verified_route_diversity": _mean(
-            score.metrics.get("verified_route_diversity", 0.0)
-            if score is not None
-            else 0.0
-            for score in first_results
+            score.metrics.get("verified_route_diversity", 0.0) if score is not None else 0.0 for score in first_results
         ),
-        "average_successful_steps": _mean(
-            item["score"].metrics.get("step_count", 0) for item in successful
-        ),
+        "average_successful_steps": _mean(item["score"].metrics.get("step_count", 0) for item in successful),
         "average_tool_calls_per_success": _mean(tool_calls_success),
-        "invalid_proposal_rate": (
-            round(total_invalid / total_tool_calls, 6) if total_tool_calls else 0.0
-        ),
+        "invalid_proposal_rate": (round(total_invalid / total_tool_calls, 6) if total_tool_calls else 0.0),
         "attempts": len(all_attempts),
         "successful_attempts": len(successful),
         "verification_tiers": {
@@ -189,8 +151,7 @@ def _by_split(episodes: list[dict[str, Any]], ks: tuple[int, ...]) -> dict[str, 
             "tasks": len(items),
             **{
                 f"pass@{k}": round(
-                    sum(any(attempt["score"].valid for attempt in item["attempts"][:k]) for item in items)
-                    / len(items),
+                    sum(any(attempt["score"].valid for attempt in item["attempts"][:k]) for item in items) / len(items),
                     6,
                 )
                 for k in ks
@@ -212,11 +173,7 @@ def _wilson_interval(successes: int, total: int, z: float = 1.959963984540054) -
     rate = successes / total
     denominator = 1 + z * z / total
     centre = (rate + z * z / (2 * total)) / denominator
-    margin = (
-        z
-        * math.sqrt(rate * (1 - rate) / total + z * z / (4 * total * total))
-        / denominator
-    )
+    margin = z * math.sqrt(rate * (1 - rate) / total + z * z / (4 * total * total)) / denominator
     return [round(max(0.0, centre - margin), 6), round(min(1.0, centre + margin), 6)]
 
 

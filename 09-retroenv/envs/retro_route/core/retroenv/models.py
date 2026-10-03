@@ -33,12 +33,8 @@ class ReactionStep:
             reaction_id=_optional_text(value.get("reaction_id")),
             reaction_smarts=_optional_text(value.get("reaction_smarts")),
             mapping_status=str(value.get("mapping_status") or "unmapped"),
-            conditions=tuple(
-                item for item in (value.get("conditions") or ()) if isinstance(item, dict)
-            ),
-            literature=tuple(
-                item for item in (value.get("literature") or ()) if isinstance(item, dict)
-            ),
+            conditions=tuple(item for item in (value.get("conditions") or ()) if isinstance(item, dict)),
+            literature=tuple(item for item in (value.get("literature") or ()) if isinstance(item, dict)),
         )
 
     def to_dict(self, *, include_evidence: bool = True) -> dict[str, Any]:
@@ -109,10 +105,7 @@ class RetroTask:
             max_steps=int(value.get("max_steps", 1)),
             stock_id=str(value["stock_id"]),
             split=str(value.get("split", "train")),
-            reference_routes=tuple(
-                ReferenceRoute.from_dict(route)
-                for route in value.get("reference_routes", [])
-            ),
+            reference_routes=tuple(ReferenceRoute.from_dict(route) for route in value.get("reference_routes", [])),
             min_routes=int(value.get("min_routes", 1)),
             max_routes=int(value.get("max_routes", 5)),
             difficulty=dict(value.get("difficulty") or {}),
@@ -140,9 +133,7 @@ class RetroTask:
             "difficulty": self.difficulty,
         }
         if include_references:
-            value["reference_routes"] = [
-                route.to_dict() for route in self.reference_routes
-            ]
+            value["reference_routes"] = [route.to_dict() for route in self.reference_routes]
         return value
 
 

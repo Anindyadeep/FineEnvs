@@ -35,8 +35,10 @@ def main() -> int:
         parser.error("no summary.json found")
     summaries.sort(key=lambda s: (-(s["pass_at_1"] or 0), -(s["mean_reward"] or 0)))
 
-    header = ("| Model | Tasks | Pass@1 (95% CI) | Exact route | Reward | Steps | Stock | Graph | "
-              "Tool calls | No emit | Refused | Cost |")
+    header = (
+        "| Model | Tasks | Pass@1 (95% CI) | Exact route | Reward | Steps | Stock | Graph | "
+        "Tool calls | No emit | Refused | Cost |"
+    )
     lines = [header, "|" + "---|" * 12]
     for s in summaries:
         c = s["components"]
@@ -53,8 +55,11 @@ def main() -> int:
         groups = sorted({name for s in summaries for name in (s.get(key) or {})})
         if not groups:
             return []
-        out = [f"\n### {title} (exact route rate)\n", "| Model | " + " | ".join(groups) + " |",
-               "|---|" + "---|" * len(groups)]
+        out = [
+            f"\n### {title} (exact route rate)\n",
+            "| Model | " + " | ".join(groups) + " |",
+            "|---|" + "---|" * len(groups),
+        ]
         for s in summaries:
             cells = []
             for name in groups:

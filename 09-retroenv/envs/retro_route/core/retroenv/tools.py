@@ -106,13 +106,22 @@ ROUTE_GRAPH_DEFS: dict[str, Any] = {
 # tool_schema_sha256 is unchanged by the move into core.
 TOOLS = [
     _function("inspect_molecule", "Inspect a molecule with RDKit.", {"smiles": SMILES}, ["smiles"]),
-    _function("pubchem_lookup", "Canonicalize a SMILES or query the frozen molecule cache.", {"query": {"type": "string"}}, ["query"]),
+    _function(
+        "pubchem_lookup",
+        "Canonicalize a SMILES or query the frozen molecule cache.",
+        {"query": {"type": "string"}},
+        ["query"],
+    ),
     _function(
         "stock_retrieve",
         "The only stock access. Search exact SMILES/InChIKey, class, SMARTS, or similarity; at most 20 results.",
         {
             "query": {"type": "string"},
-            "mode": {"type": "string", "enum": ["auto", "exact", "inchikey", "class", "substructure", "similarity"], "default": "auto"},
+            "mode": {
+                "type": "string",
+                "enum": ["auto", "exact", "inchikey", "class", "substructure", "similarity"],
+                "default": "auto",
+            },
             "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
         },
         ["query"],
@@ -120,7 +129,11 @@ TOOLS = [
     _function(
         "reaction_precedent_search",
         "Find reaction analogues from training-visible records.",
-        {"product_smiles": SMILES, "reaction_class": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10}},
+        {
+            "product_smiles": SMILES,
+            "reaction_class": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 10},
+        },
     ),
     _function(
         "validate_disconnection",
@@ -137,12 +150,21 @@ TOOLS = [
     _function(
         "reaction_conditions_search",
         "Find frozen reported conditions for a cut or analogue.",
-        {"product_smiles": SMILES, "reactants": REACTANTS, "reaction_class": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}},
+        {
+            "product_smiles": SMILES,
+            "reactants": REACTANTS,
+            "reaction_class": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+        },
     ),
     _function(
         "search_literature",
         "Search frozen citation metadata attached to training precedents.",
-        {"product_smiles": SMILES, "reaction_class": {"type": "string"}, "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5}},
+        {
+            "product_smiles": SMILES,
+            "reaction_class": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 20, "default": 5},
+        },
     ),
     _function(
         "emit_routes",

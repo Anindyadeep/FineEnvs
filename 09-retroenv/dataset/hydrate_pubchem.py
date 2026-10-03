@@ -11,25 +11,18 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-
 PROPERTIES = "CanonicalSMILES,ConnectivitySMILES,IsomericSMILES,InChIKey,MolecularFormula,MolecularWeight"
 
 
 def fetch(query: str) -> dict:
     encoded = urllib.parse.quote(query, safe="")
-    url = (
-        f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}"
-        f"/property/{PROPERTIES}/JSON"
-    )
+    url = f"https://pubchem.ncbi.nlm.nih.gov/rest/pug/compound/name/{encoded}/property/{PROPERTIES}/JSON"
     request = urllib.request.Request(url, headers={"User-Agent": "RetroEnv/0.1"})
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.load(response)
     row = payload["PropertyTable"]["Properties"][0]
     smiles = (
-        row.get("ConnectivitySMILES")
-        or row.get("CanonicalSMILES")
-        or row.get("SMILES")
-        or row.get("IsomericSMILES")
+        row.get("ConnectivitySMILES") or row.get("CanonicalSMILES") or row.get("SMILES") or row.get("IsomericSMILES")
     )
     if not smiles:
         raise ValueError("PubChem response contains no canonical SMILES")
@@ -63,9 +56,7 @@ def main() -> int:
             failures[query] = str(exc)
         time.sleep(max(0.0, args.delay))
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(
-        json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    args.output.write_text(json.dumps(cache, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps({"cached": len(cache), "failures": failures}, indent=2))
     return 1 if failures else 0
 

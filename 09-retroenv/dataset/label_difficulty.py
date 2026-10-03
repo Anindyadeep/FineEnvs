@@ -52,8 +52,14 @@ PATTERNS = {
 }
 BOC = Chem.MolFromSmarts("CC(C)(C)OC(=O)[N,O,n]")
 BOC2O = Chem.MolFromSmiles("CC(C)(C)OC(=O)OC(=O)OC(C)(C)C")
-COMMON = {"Boc protection", "Boc deprotection", "amide/ester coupling", "reductive amination",
-          "one-reactant FGI", "alkylation / SNAr"}
+COMMON = {
+    "Boc protection",
+    "Boc deprotection",
+    "amide/ester coupling",
+    "reductive amination",
+    "one-reactant FGI",
+    "alkylation / SNAr",
+}
 
 
 def _has(smiles: str, key: str) -> bool:
@@ -91,7 +97,9 @@ def step_family(reactants: list[str], product: str) -> str:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--benchmark-dir", type=Path, default=Path(".local/retroeval-v2"))
-    parser.add_argument("--archive", type=Path, default=Path("data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz"))
+    parser.add_argument(
+        "--archive", type=Path, default=Path("data/raw/paroutes-v2-benchmark/all_loaded_routes.json.gz")
+    )
     args = parser.parse_args(argv)
 
     with gzip.open(args.archive, "rt", encoding="utf-8") as handle:
@@ -116,8 +124,9 @@ def main(argv: list[str] | None = None) -> int:
         if task["split"] == "train":
             sims = [s for i, s in zip(train_ids, sims) if i != task["task_id"]]
         refs = task["reference_routes"]
-        leaves = sorted({x for r in refs for s in r["steps"] for x in s["reactants"]
-                         if x not in {q["product"] for q in r["steps"]}})
+        leaves = sorted(
+            {x for r in refs for s in r["steps"] for x in s["reactants"] if x not in {q["product"] for q in r["steps"]}}
+        )
         families = sorted({step_family(r["steps"][0]["reactants"], r["steps"][0]["product"]) for r in refs})
         min_depth = min(len(r["steps"]) for r in refs)
         nn = max(sims) if sims else 0.0
@@ -129,21 +138,23 @@ def main(argv: list[str] | None = None) -> int:
             "rare_leaf": int(min_leaf <= 5),
         }
         score = sum(points.values())
-        rows.append({
-            "task_id": task["task_id"],
-            "split": task["split"],
-            "kind": "two_route" if task["min_routes"] >= 2 else "single_route",
-            "min_depth": min_depth,
-            "heavy_atoms": mol.GetNumHeavyAtoms(),
-            "rings": rdMolDescriptors.CalcNumRings(mol),
-            "sa_score": round(sascorer.calculateScore(mol), 2),
-            "first_step_families": families,
-            "nn_train_similarity": round(nn, 3),
-            "min_leaf_archive_routes": min_leaf,
-            "points": points,
-            "score": score,
-            "tier": "easy" if score <= 1 else ("medium" if score == 2 else "hard"),
-        })
+        rows.append(
+            {
+                "task_id": task["task_id"],
+                "split": task["split"],
+                "kind": "two_route" if task["min_routes"] >= 2 else "single_route",
+                "min_depth": min_depth,
+                "heavy_atoms": mol.GetNumHeavyAtoms(),
+                "rings": rdMolDescriptors.CalcNumRings(mol),
+                "sa_score": round(sascorer.calculateScore(mol), 2),
+                "first_step_families": families,
+                "nn_train_similarity": round(nn, 3),
+                "min_leaf_archive_routes": min_leaf,
+                "points": points,
+                "score": score,
+                "tier": "easy" if score <= 1 else ("medium" if score == 2 else "hard"),
+            }
+        )
     out = args.benchmark_dir / "difficulty.jsonl"
     with out.open("w", encoding="utf-8") as handle:
         for row in sorted(rows, key=lambda r: (SPLITS.index(r["split"]), r["task_id"])):

@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_RAW_DIR = HERE.parent / "data" / "raw"
 DEFAULT_OUTPUT = DEFAULT_RAW_DIR / "RAW_INVENTORY.json"
@@ -33,9 +32,7 @@ def inventory(raw_dir: Path) -> dict[str, Any]:
     artifacts: list[dict[str, Any]] = []
     source_totals: dict[str, dict[str, int]] = {}
     for root, directories, files in os.walk(raw_dir):
-        directories[:] = sorted(
-            directory for directory in directories if directory not in EXCLUDED_PARTS
-        )
+        directories[:] = sorted(directory for directory in directories if directory not in EXCLUDED_PARTS)
         for filename in sorted(files):
             path = Path(root) / filename
             relative = path.relative_to(raw_dir)

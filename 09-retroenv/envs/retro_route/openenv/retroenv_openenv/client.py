@@ -82,8 +82,9 @@ class RetroEnvClient:
 
     # --- Episode ------------------------------------------------------------
 
-    def reset(self, split: str, index: int | None = None, task_id: str | None = None,
-              episode_id: str | None = None) -> dict[str, Any]:
+    def reset(
+        self, split: str, index: int | None = None, task_id: str | None = None, episode_id: str | None = None
+    ) -> dict[str, Any]:
         kwargs: dict[str, Any] = {"split": split}
         if index is not None:
             kwargs["index"] = index
@@ -197,8 +198,9 @@ class RemoteRetroRouteEnv:
             reaction_class: Optional reaction class filter.
             limit: Maximum results, at most 20.
         """
-        return self._call("reaction_precedent_search", product_smiles=product_smiles,
-                          reaction_class=reaction_class, limit=limit)
+        return self._call(
+            "reaction_precedent_search", product_smiles=product_smiles, reaction_class=reaction_class, limit=limit
+        )
 
     def validate_disconnection(self, product_smiles: str, reactants: list[str], reaction_class: str = "") -> str:
         """Check one proposed product-to-reactants cut against hidden evidence.
@@ -208,8 +210,9 @@ class RemoteRetroRouteEnv:
             reactants: The proposed reactant SMILES.
             reaction_class: Optional reaction class.
         """
-        return self._call("validate_disconnection", product_smiles=product_smiles,
-                          reactants=reactants, reaction_class=reaction_class)
+        return self._call(
+            "validate_disconnection", product_smiles=product_smiles, reactants=reactants, reaction_class=reaction_class
+        )
 
     def reaction_class_lookup(self, product_smiles: str, reactants: list[str]) -> str:
         """Name the class of a supported cut.
@@ -220,8 +223,9 @@ class RemoteRetroRouteEnv:
         """
         return self._call("reaction_class_lookup", product_smiles=product_smiles, reactants=reactants)
 
-    def reaction_conditions_search(self, product_smiles: str = "", reactants: list[str] | None = None,
-                                   reaction_class: str = "", limit: int = 5) -> str:
+    def reaction_conditions_search(
+        self, product_smiles: str = "", reactants: list[str] | None = None, reaction_class: str = "", limit: int = 5
+    ) -> str:
         """Find reported conditions for a cut or close precedents.
 
         Args:
@@ -230,8 +234,13 @@ class RemoteRetroRouteEnv:
             reaction_class: Optional reaction class.
             limit: Maximum results, at most 20.
         """
-        return self._call("reaction_conditions_search", product_smiles=product_smiles,
-                          reactants=reactants or [], reaction_class=reaction_class, limit=limit)
+        return self._call(
+            "reaction_conditions_search",
+            product_smiles=product_smiles,
+            reactants=reactants or [],
+            reaction_class=reaction_class,
+            limit=limit,
+        )
 
     def search_literature(self, product_smiles: str = "", reaction_class: str = "", limit: int = 5) -> str:
         """Search frozen citation metadata attached to training precedents.
@@ -241,8 +250,9 @@ class RemoteRetroRouteEnv:
             reaction_class: Optional reaction class filter.
             limit: Maximum results, at most 20.
         """
-        return self._call("search_literature", product_smiles=product_smiles,
-                          reaction_class=reaction_class, limit=limit)
+        return self._call(
+            "search_literature", product_smiles=product_smiles, reaction_class=reaction_class, limit=limit
+        )
 
     def emit_routes(self, submission: dict) -> str:
         """Submit the final route trees and end the episode.

@@ -79,9 +79,7 @@ class Resources:
         if not splits:
             raise RuntimeError(f"no task splits found in {settings.tasks_dir}")
         if settings.default_split not in splits:
-            raise RuntimeError(
-                f"default split {settings.default_split!r} is not among {splits}"
-            )
+            raise RuntimeError(f"default split {settings.default_split!r} is not among {splits}")
         # Eval references never enter retrieval: precedents come from train only.
         training = store.tasks("train") if "train" in splits else ()
         # Canonicalize every stock once, so the first reset is not slow.

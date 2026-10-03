@@ -29,9 +29,7 @@ def main() -> int:
         if not episodes:
             raise ValueError(f"token proxy contains no episodes: {proxy_path}")
         mean_prompt = sum(row["usage"]["prompt_tokens"] for row in episodes) / len(episodes)
-        mean_completion = sum(
-            row["usage"]["completion_tokens"] for row in episodes
-        ) / len(episodes)
+        mean_completion = sum(row["usage"]["completion_tokens"] for row in episodes) / len(episodes)
         episodes_planned = task_count * attempts
         estimated = episodes_planned * (
             mean_prompt * float(model["prompt_usd_per_token"])
@@ -55,9 +53,7 @@ def main() -> int:
         "warning": "Projection only; routing, caching, reasoning tokens, and task difficulty vary.",
         "run": config["run"],
         "models": rows,
-        "estimated_total_cost_usd": round(
-            sum(row["estimated_cost_usd"] for row in rows), 4
-        ),
+        "estimated_total_cost_usd": round(sum(row["estimated_cost_usd"] for row in rows), 4),
     }
     rendered = json.dumps(result, indent=2, sort_keys=True) + "\n"
     if args.output:

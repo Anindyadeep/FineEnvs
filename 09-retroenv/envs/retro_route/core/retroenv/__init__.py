@@ -6,4 +6,3 @@ from .verifier import RouteVerifier
 
 __all__ = ["RetroRouteSession", "RouteVerifier", "TaskStore"]
 __version__ = "0.1.0"
-

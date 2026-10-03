@@ -6,13 +6,11 @@ import json
 
 import pytest
 from openenv.core.env_server.mcp_types import CallToolAction, ListToolsAction
-
+from openenv_helpers import resources, settings  # noqa: F401  (resources is a fixture)
 from retroenv.graph import routes_to_submission
 from retroenv.tools import tool_names
 from retroenv_openenv.config import Resources
 from retroenv_openenv.environment import RetroRouteEnvironment
-
-from openenv_helpers import resources, settings  # noqa: F401  (resources is a fixture)
 
 
 def _call(env, name, **arguments):
@@ -68,8 +66,9 @@ def test_malformed_submission_is_scored_not_rejected(resources):
 
 
 def test_budget_exhaustion_keeps_emit_available(resources):
-    small = Resources(settings=settings(max_tool_calls=2), store=resources.store,
-                      precedent_index=resources.precedent_index)
+    small = Resources(
+        settings=settings(max_tool_calls=2), store=resources.store, precedent_index=resources.precedent_index
+    )
     env = RetroRouteEnvironment(small)
     env.reset(split="eval", index=1)
     for _ in range(2):
@@ -80,16 +79,18 @@ def test_budget_exhaustion_keeps_emit_available(resources):
 
 
 def test_unaided_toolset_hides_the_reference_oracle(resources):
-    unaided = Resources(settings=settings(toolset="unaided"), store=resources.store,
-                        precedent_index=resources.precedent_index)
+    unaided = Resources(
+        settings=settings(toolset="unaided"), store=resources.store, precedent_index=resources.precedent_index
+    )
     env = RetroRouteEnvironment(unaided)
     opening = env.reset(split="eval", index=0)
     names = [tool.name for tool in env.step(ListToolsAction()).tools]
     assert "validate_disconnection" not in names and "reaction_class_lookup" not in names
     assert "Validate proposed cuts" not in opening.metadata["prompt"]
     step = resources.store.task("eval", 0).reference_routes[0].steps[0]
-    result = _call(env, "reaction_conditions_search", product_smiles=step.product,
-                   reactants=list(step.reactants)).result.data
+    result = _call(
+        env, "reaction_conditions_search", product_smiles=step.product, reactants=list(step.reactants)
+    ).result.data
     assert result["supported"] is False and result["source"] == "training-visible analogues"
 
 

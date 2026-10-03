@@ -5,11 +5,10 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 
+from openenv_helpers import server_url  # noqa: F401  (fixture)
 from retroenv_openenv import agent
 from retroenv_openenv.agent import normalize_arguments
 from retroenv_openenv.client import RetroEnvClient
-
-from openenv_helpers import server_url  # noqa: F401  (fixture)
 from test_server import STORE, _oracle
 
 
@@ -26,14 +25,21 @@ class ScriptedLLM:
         name, arguments = self.calls.pop(0) if self.calls else (None, None)
         tool_calls = []
         if name:
-            call = SimpleNamespace(id=f"call{len(self.exposed)}",
-                                   function=SimpleNamespace(name=name, arguments=arguments))
+            call = SimpleNamespace(
+                id=f"call{len(self.exposed)}", function=SimpleNamespace(name=name, arguments=arguments)
+            )
             call.model_dump = lambda exclude_none=True, c=call: {
-                "id": c.id, "type": "function", "function": {"name": c.function.name, "arguments": c.function.arguments}}
+                "id": c.id,
+                "type": "function",
+                "function": {"name": c.function.name, "arguments": c.function.arguments},
+            }
             tool_calls = [call]
         message = SimpleNamespace(content="", tool_calls=tool_calls)
-        return SimpleNamespace(choices=[SimpleNamespace(message=message)], model="scripted",
-                               usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, model_extra={}))
+        return SimpleNamespace(
+            choices=[SimpleNamespace(message=message)],
+            model="scripted",
+            usage=SimpleNamespace(prompt_tokens=10, completion_tokens=5, model_extra={}),
+        )
 
 
 def test_normalize_arguments_repairs_only_a_stringified_submission():
@@ -46,10 +52,12 @@ def test_normalize_arguments_repairs_only_a_stringified_submission():
 
 def test_episode_scores_through_the_server(server_url):
     target = STORE.task("eval", 7).target_smiles
-    llm = ScriptedLLM([
-        ("stock_retrieve", json.dumps({"query": target, "mode": "exact"})),
-        ("emit_routes", json.dumps({"submission": json.dumps(_oracle("eval", 7)) + "}"})),
-    ])
+    llm = ScriptedLLM(
+        [
+            ("stock_retrieve", json.dumps({"query": target, "mode": "exact"})),
+            ("emit_routes", json.dumps({"submission": json.dumps(_oracle("eval", 7)) + "}"})),
+        ]
+    )
     with RetroEnvClient(server_url) as env:
         opening = env.reset("eval", index=7)
         result = agent.run_episode(llm, env, opening, agent.AgentConfig(model="scripted", max_turns=4))

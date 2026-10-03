@@ -8,7 +8,7 @@ import json
 import sys
 from collections import Counter
 from pathlib import Path
-from typing import Any, Iterable, Iterator, TextIO
+from typing import Any, Iterable, Iterator
 
 from rdkit.Chem import rdChemReactions
 
@@ -19,7 +19,6 @@ from .chemistry import (
     primary_product,
     stable_hash,
 )
-
 
 SCHEMA_VERSION = "litefold-reaction-v1"
 EVIDENCE_KINDS = {"observed", "generated", "simulated"}
@@ -62,9 +61,7 @@ def normalize_row(
         raw_reaction = f"{reactants}>{reagents}>{products}"
 
     canonical, reactants, reagents, products = canonicalize_reaction(raw_reaction)
-    mapped_canonical, _, _, _ = canonicalize_reaction(
-        raw_reaction, keep_atom_maps=True
-    )
+    mapped_canonical, _, _, _ = canonicalize_reaction(raw_reaction, keep_atom_maps=True)
     mapping = audit_atom_mapping(raw_reaction)
     if mapping["status"] == "invalid":
         raise ChemistryError("invalid atom mapping: " + "; ".join(mapping["errors"]))
@@ -78,9 +75,7 @@ def normalize_row(
 
     kind = (_text(row.get("evidence_kind")) or evidence_kind).lower()
     if kind not in EVIDENCE_KINDS:
-        raise ValueError(
-            f"evidence_kind must be one of {sorted(EVIDENCE_KINDS)}, got {kind!r}"
-        )
+        raise ValueError(f"evidence_kind must be one of {sorted(EVIDENCE_KINDS)}, got {kind!r}")
 
     reaction_smarts = _text(row.get("reaction_smarts"))
     template_hash = None
@@ -99,11 +94,7 @@ def normalize_row(
         "record_id": _text(row.get("source_record_id") or row.get("id")),
         # Patent/application/route grouping is required for split leakage audits.
         # It is deliberately distinct from the per-reaction record identifier.
-        "group_id": _text(
-            row.get("source_group_id")
-            or row.get("patent_id")
-            or row.get("route_group_id")
-        ),
+        "group_id": _text(row.get("source_group_id") or row.get("patent_id") or row.get("route_group_id")),
         "url": _text(row.get("source_url")),
         "publication_year": _integer_or_none(row.get("publication_year")),
     }
@@ -119,9 +110,7 @@ def normalize_row(
         "reaction_id": stable_hash(canonical, prefix="rxn_", length=24),
         "canonical_reaction_hash": reaction_hash,
         "reaction_smiles": canonical,
-        "mapped_reaction_smiles": (
-            mapped_canonical if mapping["status"] != "unmapped" else None
-        ),
+        "mapped_reaction_smiles": (mapped_canonical if mapping["status"] != "unmapped" else None),
         "reactants": list(reactants),
         "reagents": list(reagents),
         "products": list(products),
@@ -135,9 +124,7 @@ def normalize_row(
         "conditions": [conditions] if conditions not in (None, "", {}) else [],
         "confidence": confidence,
         "confidence_values": [confidence] if confidence is not None else [],
-        "annotations": [
-            annotations
-        ] if (annotations := _jsonish(row.get("annotations"))) not in (None, "", {}) else [],
+        "annotations": [annotations] if (annotations := _jsonish(row.get("annotations"))) not in (None, "", {}) else [],
         "evidence_kind": kind,
         "evidence_kinds": [kind],
         "source": [source],
@@ -160,9 +147,7 @@ def merge_duplicate(existing: dict[str, Any], incoming: dict[str, Any]) -> None:
     existing["reaction_class"] = classes[0] if len(classes) == 1 else None
     templates = existing["reaction_smarts_candidates"]
     existing["reaction_smarts"] = templates[0] if len(templates) == 1 else None
-    existing["template_hash"] = (
-        stable_hash(templates[0], prefix="tpl_") if len(templates) == 1 else None
-    )
+    existing["template_hash"] = stable_hash(templates[0], prefix="tpl_") if len(templates) == 1 else None
     kinds = existing["evidence_kinds"]
     existing["evidence_kind"] = kinds[0] if len(kinds) == 1 else "mixed"
     confidences = existing["confidence_values"]
@@ -283,7 +268,7 @@ def _jsonish(value: Any) -> Any:
     text = value.strip()
     if not text:
         return None
-    if text[0] in "[{\"" or text in {"true", "false", "null"}:
+    if text[0] in '[{"' or text in {"true", "false", "null"}:
         try:
             return json.loads(text)
         except json.JSONDecodeError:

@@ -5,20 +5,19 @@ from __future__ import annotations
 import threading
 
 import httpx
-
+from openenv_helpers import BENCHMARK, server_url  # noqa: F401  (server_url is a fixture)
 from retroenv.graph import routes_to_submission
 from retroenv.store import TaskStore
 from retroenv_openenv.client import RetroEnvClient
-
-from openenv_helpers import BENCHMARK, server_url  # noqa: F401  (server_url is a fixture)
 
 STORE = TaskStore(BENCHMARK / "tasks-private", BENCHMARK / "stocks")
 
 
 def _oracle(split, index):
     task = STORE.task(split, index)
-    return routes_to_submission(task.target_smiles, task.reference_routes[: task.max_routes],
-                                STORE.stock(task.stock_id), source="test")
+    return routes_to_submission(
+        task.target_smiles, task.reference_routes[: task.max_routes], STORE.stock(task.stock_id), source="test"
+    )
 
 
 def test_health_metadata_and_task_api(server_url):

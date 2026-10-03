@@ -56,9 +56,7 @@ class TaskStore:
                     except Exception as exc:
                         raise ValueError(f"{path}:{line_number}: {exc}") from exc
                     if task.split != split:
-                        raise ValueError(
-                            f"{path}:{line_number}: task split {task.split!r} != {split!r}"
-                        )
+                        raise ValueError(f"{path}:{line_number}: task split {task.split!r} != {split!r}")
                     if task.task_id in seen:
                         raise ValueError(f"duplicate task_id in {path}: {task.task_id}")
                     seen.add(task.task_id)
@@ -83,4 +81,3 @@ class TaskStore:
     def iter_all(self) -> Iterable[RetroTask]:
         for split in self.splits():
             yield from self.tasks(split)
-

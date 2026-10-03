@@ -12,7 +12,6 @@ from rdkit.Chem import Descriptors, rdFingerprintGenerator, rdMolDescriptors
 from .chemistry import canonical_step_key, canonicalize_smiles
 from .models import RetroTask
 
-
 CLASS_SMARTS = {
     "alcohol": "[OX2H][CX4]",
     "amine": "[NX3;H1,H2;!$(NC=O)]",
@@ -67,8 +66,7 @@ class PrecedentIndex:
         self.records = tuple(records)
         generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         self._fingerprints = tuple(
-            generator.GetFingerprint(Chem.MolFromSmiles(record.product))
-            for record in self.records
+            generator.GetFingerprint(Chem.MolFromSmiles(record.product)) for record in self.records
         )
         self._generator = generator
 
@@ -107,11 +105,7 @@ class PrecedentIndex:
                     "conditions": list(record.conditions)[:3],
                     "literature": list(record.literature)[:3],
                     "source": [
-                        {
-                            key: value
-                            for key, value in source.items()
-                            if key in {"name", "url", "publication_year"}
-                        }
+                        {key: value for key, value in source.items() if key in {"name", "url", "publication_year"}}
                         for source in record.source[:3]
                     ],
                 }
@@ -138,9 +132,7 @@ class StockIndex:
         self._by_inchikey = dict(zip(self.inchikeys, self.smiles))
         self._by_smiles = dict(zip(self.smiles, self.inchikeys))
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-        self._fingerprints = tuple(
-            self._generator.GetFingerprint(molecule) for molecule in self.molecules
-        )
+        self._fingerprints = tuple(self._generator.GetFingerprint(molecule) for molecule in self.molecules)
 
     def retrieve(self, query: str, *, mode: str = "auto", limit: int = 10) -> dict[str, Any]:
         limit = max(1, min(int(limit), 20))
@@ -168,17 +160,13 @@ class StockIndex:
             elif mode in {"class", "substructure"}:
                 smarts = CLASS_SMARTS.get(query.lower().replace(" ", "_")) if mode == "class" else query
                 if not smarts:
-                    raise ValueError(
-                        f"unknown class {query!r}; available: {sorted(CLASS_SMARTS)}"
-                    )
+                    raise ValueError(f"unknown class {query!r}; available: {sorted(CLASS_SMARTS)}")
                 pattern = Chem.MolFromSmarts(smarts)
                 if pattern is None:
                     raise ValueError("invalid SMARTS query")
                 matches = [
                     (1.0, smiles, inchikey)
-                    for smiles, inchikey, molecule in zip(
-                        self.smiles, self.inchikeys, self.molecules
-                    )
+                    for smiles, inchikey, molecule in zip(self.smiles, self.inchikeys, self.molecules)
                     if molecule.HasSubstructMatch(pattern)
                 ]
             elif mode == "similarity":
@@ -186,9 +174,7 @@ class StockIndex:
                 query_fp = self._generator.GetFingerprint(molecule)
                 matches = [
                     (DataStructs.TanimotoSimilarity(query_fp, fingerprint), smiles, inchikey)
-                    for smiles, inchikey, fingerprint in zip(
-                        self.smiles, self.inchikeys, self._fingerprints
-                    )
+                    for smiles, inchikey, fingerprint in zip(self.smiles, self.inchikeys, self._fingerprints)
                 ]
                 matches.sort(key=lambda item: (-item[0], item[1]))
             else:
@@ -214,9 +200,7 @@ def cached_stock_index(stock: frozenset[str]) -> StockIndex:
     return StockIndex(stock)
 
 
-def molecule_lookup(
-    query: str, cache: dict[str, dict[str, Any]] | None = None
-) -> dict[str, Any]:
+def molecule_lookup(query: str, cache: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:
     """Resolve a SMILES locally; names/CAS require the pre-hydrated PubChem cache."""
 
     normalized_query = str(query or "").strip()

@@ -43,4 +43,3 @@ def make_task(
         ),
         difficulty={"scaffold": "acyclic"},
     )
-

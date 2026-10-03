@@ -10,7 +10,6 @@ from typing import Any, Iterable
 from .chemistry import canonicalize_components, canonicalize_smiles
 from .models import ReactionStep, ReferenceRoute
 
-
 GRAPH_SCHEMA_VERSION = "retro-route-graph-v1"
 
 
@@ -142,22 +141,14 @@ def _parse_molecule_node(
         metadata = {}
     for required in ("explanation", "confidence", "literature", "precursor_roles"):
         if required not in metadata:
-            result.errors.append(
-                f"{path}.children[0].metadata.{required} is required"
-            )
+            result.errors.append(f"{path}.children[0].metadata.{required} is required")
     if not (metadata.get("reaction_class") or metadata.get("classification")):
-        result.errors.append(
-            f"{path}.children[0].metadata.reaction_class is required"
-        )
+        result.errors.append(f"{path}.children[0].metadata.reaction_class is required")
     confidence = metadata.get("confidence")
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1:
-        result.errors.append(
-            f"{path}.children[0].metadata.confidence must be between 0 and 1"
-        )
+        result.errors.append(f"{path}.children[0].metadata.confidence must be between 0 and 1")
     if not isinstance(metadata.get("precursor_roles"), dict):
-        result.errors.append(
-            f"{path}.children[0].metadata.precursor_roles must be an object"
-        )
+        result.errors.append(f"{path}.children[0].metadata.precursor_roles must be an object")
     if "children" not in reaction:
         result.errors.append(f"{path}.children[0].children is required")
     reaction_children = reaction.get("children", [])
@@ -194,9 +185,7 @@ def _parse_molecule_node(
                 ReactionStep(
                     product=smiles,
                     reactants=canonical_reactants,
-                    reaction_class=_text(
-                        metadata.get("reaction_class") or metadata.get("classification")
-                    ),
+                    reaction_class=_text(metadata.get("reaction_class") or metadata.get("classification")),
                     conditions=tuple(item for item in conditions if isinstance(item, dict)),
                     literature=tuple(item for item in literature if isinstance(item, dict)),
                 )
@@ -258,10 +247,7 @@ def route_to_graph(
                     "type": "reaction",
                     "is_reaction": True,
                     "metadata": metadata,
-                    "children": [
-                        build(reactant, (*ancestry, canonical))
-                        for reactant in step.reactants
-                    ],
+                    "children": [build(reactant, (*ancestry, canonical)) for reactant in step.reactants],
                 }
             ],
         }
@@ -278,9 +264,7 @@ def routes_to_submission(
 ) -> dict[str, Any]:
     return {
         "schema_version": GRAPH_SCHEMA_VERSION,
-        "routes": [
-            route_to_graph(target_smiles, route, stock, source=source) for route in routes
-        ],
+        "routes": [route_to_graph(target_smiles, route, stock, source=source) for route in routes],
     }
 
 

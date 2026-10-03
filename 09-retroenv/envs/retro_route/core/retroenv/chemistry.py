@@ -44,17 +44,13 @@ def canonicalize_smiles(smiles: str, *, keep_atom_maps: bool = False) -> str:
     return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
 
 
-def canonicalize_components(
-    value: str | Iterable[str], *, keep_atom_maps: bool = False
-) -> tuple[str, ...]:
+def canonicalize_components(value: str | Iterable[str], *, keep_atom_maps: bool = False) -> tuple[str, ...]:
     if isinstance(value, str):
         raw = value.split(".") if value.strip() else []
     else:
         raw = list(value)
     components = [
-        canonicalize_smiles(str(item).strip(), keep_atom_maps=keep_atom_maps)
-        for item in raw
-        if str(item).strip()
+        canonicalize_smiles(str(item).strip(), keep_atom_maps=keep_atom_maps) for item in raw if str(item).strip()
     ]
     return tuple(sorted(components))
 
@@ -62,9 +58,7 @@ def canonicalize_components(
 def split_reaction_smiles(reaction_smiles: str) -> tuple[str, str, str]:
     parts = (reaction_smiles or "").strip().split(">")
     if len(parts) != 3:
-        raise ChemistryError(
-            "reaction SMILES must have reactants>reagents>products form"
-        )
+        raise ChemistryError("reaction SMILES must have reactants>reagents>products form")
     if not parts[0].strip() or not parts[2].strip():
         raise ChemistryError("reaction SMILES needs non-empty reactants and products")
     return parts[0].strip(), parts[1].strip(), parts[2].strip()
@@ -128,9 +122,7 @@ def audit_atom_mapping(reaction_smiles: str) -> dict[str, Any]:
     missing = sorted(set(right) - set(left))
     if missing:
         errors.append(f"product atom maps absent from reactants: {missing}")
-    mismatched = sorted(
-        number for number in set(left) & set(right) if left[number] != right[number]
-    )
+    mismatched = sorted(number for number in set(left) & set(right) if left[number] != right[number])
     if mismatched:
         errors.append(f"mapped atom element/isotope changed: {mismatched}")
 
@@ -159,9 +151,7 @@ def canonical_step_key(product: str, reactants: Iterable[str]) -> str:
 def inspect_molecule(smiles: str) -> dict[str, Any]:
     mol = parse_molecule(smiles)
     canonical = canonicalize_smiles(smiles)
-    chiral_centres = Chem.FindMolChiralCenters(
-        mol, includeUnassigned=True, useLegacyImplementation=False
-    )
+    chiral_centres = Chem.FindMolChiralCenters(mol, includeUnassigned=True, useLegacyImplementation=False)
     return {
         "valid": True,
         "canonical_smiles": canonical,
@@ -171,9 +161,7 @@ def inspect_molecule(smiles: str) -> dict[str, Any]:
         "rings": rdMolDescriptors.CalcNumRings(mol),
         "formal_charge": Chem.GetFormalCharge(mol),
         "chiral_centres": len(chiral_centres),
-        "unassigned_chiral_centres": sum(
-            1 for _, assignment in chiral_centres if assignment == "?"
-        ),
+        "unassigned_chiral_centres": sum(1 for _, assignment in chiral_centres if assignment == "?"),
         "murcko_scaffold": scaffold_smiles(canonical),
     }
 
@@ -258,4 +246,3 @@ def _factorial_bounded(value: int, stop: int) -> int:
         if result >= stop:
             return result
     return result
-

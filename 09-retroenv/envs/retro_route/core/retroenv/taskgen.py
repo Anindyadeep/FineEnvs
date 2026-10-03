@@ -24,7 +24,6 @@ from .models import ReactionStep, ReferenceRoute, RetroTask
 from .store import load_stock
 from .verifier import RouteVerifier
 
-
 SPLITS = ("train", "dev", "eval", "stress")
 DEFAULT_RATIOS = (2 / 3, 1 / 15, 2 / 15, 2 / 15)
 
@@ -96,9 +95,7 @@ def tasks_from_corpus(
             reaction_id=record["reaction_id"],
             reaction_smarts=record.get("reaction_smarts"),
             mapping_status=(record.get("atom_mapping") or {}).get("status", "unmapped"),
-            conditions=tuple(
-                item for item in raw_conditions if isinstance(item, dict)
-            ),
+            conditions=tuple(item for item in raw_conditions if isinstance(item, dict)),
         )
         route = ReferenceRoute(
             route_id=f"route_{record['reaction_id']}",
@@ -232,9 +229,7 @@ def _reference_replays(
         split="unassigned",
         reference_routes=(route,),
     )
-    submitted = {
-        "route": [step.to_dict(include_evidence=False) for step in route.steps]
-    }
+    submitted = {"route": [step.to_dict(include_evidence=False) for step in route.steps]}
     return verifier.score_route(task, submitted, stock).valid
 
 
@@ -292,18 +287,13 @@ def assign_strict_splits(
         generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         route_products = [
             sorted(
-                {
-                    canonicalize_smiles(step.product)
-                    for route in task.reference_routes
-                    for step in route.steps
-                }
+                {canonicalize_smiles(step.product) for route in task.reference_routes for step in route.steps}
                 | {canonicalize_smiles(task.target_smiles)}
             )
             for task in tasks
         ]
         fps = [
-            [generator.GetFingerprint(Chem.MolFromSmiles(smiles)) for smiles in products]
-            for products in route_products
+            [generator.GetFingerprint(Chem.MolFromSmiles(smiles)) for smiles in products] for products in route_products
         ]
         for right in range(1, len(fps)):
             for left in range(right):
@@ -408,35 +398,25 @@ def scaffold_group_key(smiles: str, *, exact_single_ring: bool = False) -> str:
     return scaffold
 
 
-def audit_splits(
-    tasks: Iterable[RetroTask], *, exact_single_ring_scaffolds: bool = False
-) -> dict[str, Any]:
-    by_split: dict[str, dict[str, set[str]]] = {
-        split: defaultdict(set) for split in SPLITS
-    }
+def audit_splits(tasks: Iterable[RetroTask], *, exact_single_ring_scaffolds: bool = False) -> dict[str, Any]:
+    by_split: dict[str, dict[str, set[str]]] = {split: defaultdict(set) for split in SPLITS}
     for task in tasks:
         bucket = by_split[task.split]
         bucket["targets"].add(canonicalize_smiles(task.target_smiles))
-        bucket["scaffolds"].add(
-            scaffold_group_key(task.target_smiles, exact_single_ring=exact_single_ring_scaffolds)
-        )
+        bucket["scaffolds"].add(scaffold_group_key(task.target_smiles, exact_single_ring=exact_single_ring_scaffolds))
         for route in task.reference_routes:
             bucket["route_ids"].add(route.route_id)
             for step in route.steps:
                 product = canonicalize_smiles(step.product)
                 bucket["route_products"].add(product)
-                product_scaffold = scaffold_group_key(
-                    product, exact_single_ring=exact_single_ring_scaffolds
-                )
+                product_scaffold = scaffold_group_key(product, exact_single_ring=exact_single_ring_scaffolds)
                 if product_scaffold:
                     bucket["route_product_scaffolds"].add(product_scaffold)
                 if step.reaction_id:
                     bucket["reaction_ids"].add(step.reaction_id)
             for source in route.source:
                 if source.get("group_id"):
-                    bucket["source_groups"].add(
-                        f"{source.get('name', '')}:{source['group_id']}"
-                    )
+                    bucket["source_groups"].add(f"{source.get('name', '')}:{source['group_id']}")
     overlaps: list[dict[str, Any]] = []
     for left_index, left in enumerate(SPLITS):
         for right in SPLITS[left_index + 1 :]:
@@ -470,17 +450,13 @@ def write_tasks(tasks: list[RetroTask], output_dir: Path, manifest: dict[str, An
         with path.open("w", encoding="utf-8") as handle:
             for task in sorted((task for task in tasks if task.split == split), key=lambda item: item.task_id):
                 handle.write(json.dumps(task.to_dict(), sort_keys=True, separators=(",", ":")) + "\n")
-    (output_dir / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    (output_dir / "manifest.json").write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def _dedupe_reference_routes(routes: Iterable[ReferenceRoute]) -> list[ReferenceRoute]:
     unique: dict[str, ReferenceRoute] = {}
     for route in routes:
-        key = json.dumps(
-            [step.to_dict(include_evidence=False) for step in route.steps], sort_keys=True
-        )
+        key = json.dumps([step.to_dict(include_evidence=False) for step in route.steps], sort_keys=True)
         unique.setdefault(key, route)
     return [unique[key] for key in sorted(unique)]
 
@@ -504,7 +480,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-steps", type=int, default=3)
     parser.add_argument("--near-duplicate-threshold", type=float, default=0.90)
     parser.add_argument("--near-duplicate-max-tasks", type=int, default=25_000)
-    parser.add_argument("--ratios", nargs=4, type=float, metavar=("TRAIN", "DEV", "EVAL", "STRESS"), default=DEFAULT_RATIOS)
+    parser.add_argument(
+        "--ratios", nargs=4, type=float, metavar=("TRAIN", "DEV", "EVAL", "STRESS"), default=DEFAULT_RATIOS
+    )
     return parser
 
 
@@ -527,9 +505,7 @@ def main(argv: list[str] | None = None) -> int:
         counters.update(counts)
         inputs.append({"path": str(args.corpus), "sha256": _sha256(args.corpus)})
     if args.routes:
-        built, counts = tasks_from_routes(
-            args.routes, stock, args.stock_id, max_steps=args.max_steps
-        )
+        built, counts = tasks_from_routes(args.routes, stock, args.stock_id, max_steps=args.max_steps)
         tasks.extend(built)
         counters.update(counts)
         inputs.append({"path": str(args.routes), "sha256": _sha256(args.routes)})
@@ -545,7 +521,12 @@ def main(argv: list[str] | None = None) -> int:
     manifest = {
         "schema_version": "retro-task-build-v1",
         "inputs": inputs,
-        "stock": {"id": args.stock_id, "path": str(args.stock_file), "sha256": _sha256(args.stock_file), "molecules": len(stock)},
+        "stock": {
+            "id": args.stock_id,
+            "path": str(args.stock_file),
+            "sha256": _sha256(args.stock_file),
+            "molecules": len(stock),
+        },
         "counts": dict(sorted(counters.items())),
         "split": split_manifest,
     }

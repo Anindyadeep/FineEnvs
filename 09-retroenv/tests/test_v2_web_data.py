@@ -100,4 +100,3 @@ def test_legacy_call_recovery_keeps_arguments_and_excludes_terminal_call():
     assert len(rows) == 1
     assert rows[0]["arguments"] == {"query": "CCO", "mode": "exact"}
     assert rows[0]["summary"]["hits"] == ["CCO"]
-

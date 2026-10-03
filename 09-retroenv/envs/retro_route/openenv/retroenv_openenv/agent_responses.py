@@ -84,9 +84,12 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
             usage["reasoning_tokens"] += int(getattr(out_details, "reasoning_tokens", 0) or 0)
         output = [item.model_dump(exclude_none=True) for item in response.output]
         items.extend(output)
-        transcript.append({"role": "assistant", "content": [
-            {k: v for k, v in item.items() if k != "encrypted_content"} for item in output
-        ]})
+        transcript.append(
+            {
+                "role": "assistant",
+                "content": [{k: v for k, v in item.items() if k != "encrypted_content"} for item in output],
+            }
+        )
 
         calls = [item for item in response.output if item.type == "function_call"]
         if not calls:

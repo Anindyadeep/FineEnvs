@@ -40,20 +40,23 @@ def main() -> int:
 
             llm = anthropic.Anthropic(api_key=os.getenv(args.api_key_env or "ANTHROPIC_API_KEY"))
             result = agent_anthropic.run_episode(
-                llm, env, opening, agent_anthropic.ClaudeConfig(model=args.model, max_turns=args.max_turns))
+                llm, env, opening, agent_anthropic.ClaudeConfig(model=args.model, max_turns=args.max_turns)
+            )
         else:
             from openai import OpenAI
 
             if args.provider == "openai":
                 llm = OpenAI(api_key=os.getenv(args.api_key_env or "OPENAI_API_KEY"))
                 result = agent_responses.run_episode(
-                    llm, env, opening, agent_responses.ResponsesConfig(model=args.model, max_turns=args.max_turns))
+                    llm, env, opening, agent_responses.ResponsesConfig(model=args.model, max_turns=args.max_turns)
+                )
             else:
                 if not args.endpoint:
                     parser.error("--endpoint is required for --provider chat")
                 llm = OpenAI(base_url=args.endpoint, api_key=os.getenv(args.api_key_env or "OPENAI_API_KEY", "unused"))
                 result = agent.run_episode(
-                    llm, env, opening, agent.AgentConfig(model=args.model, max_turns=args.max_turns))
+                    llm, env, opening, agent.AgentConfig(model=args.model, max_turns=args.max_turns)
+                )
 
     for message in result["transcript"]:
         if message["role"] == "tool":
@@ -61,7 +64,9 @@ def main() -> int:
             continue
         content = message.get("content")
         calls = message.get("tool_calls") or [
-            block for block in (content if isinstance(content, list) else []) if block.get("type") in ("tool_use", "function_call")
+            block
+            for block in (content if isinstance(content, list) else [])
+            if block.get("type") in ("tool_use", "function_call")
         ]
         for call in calls:
             name = call.get("name") or call.get("function", {}).get("name")
@@ -71,8 +76,10 @@ def main() -> int:
             for block in content:
                 if block.get("type") == "tool_result":
                     print(f"    -> {str(block.get('content'))[:200]}")
-    print(f"\nreward {result['reward']:.3f}  valid {result['valid']}  exact {result['exact_match']}  "
-          f"turns {result['turns']}  tool calls {result['tool_calls']}")
+    print(
+        f"\nreward {result['reward']:.3f}  valid {result['valid']}  exact {result['exact_match']}  "
+        f"turns {result['turns']}  tool calls {result['tool_calls']}"
+    )
     if result["hard_failures"]:
         print("failures: " + "; ".join(result["hard_failures"][:3]))
     return 0

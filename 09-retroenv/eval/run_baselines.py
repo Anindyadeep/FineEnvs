@@ -78,9 +78,7 @@ def main() -> int:
         _write_jsonl(path, prediction_rows)
         reports[name] = evaluate(store, prediction_rows, ks=(1,))
     report_path = args.output_dir / "report.json"
-    report_path.write_text(
-        json.dumps(reports, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    report_path.write_text(json.dumps(reports, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     summary = {
         name: {
             key: report[key]

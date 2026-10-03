@@ -92,17 +92,14 @@ def rollout(
             resolved_models.add(str(response.model))
         if not response.choices:
             errors.append(
-                "API returned no choices: "
-                + json.dumps(response.model_dump(exclude_none=True), sort_keys=True)[:1000]
+                "API returned no choices: " + json.dumps(response.model_dump(exclude_none=True), sort_keys=True)[:1000]
             )
             break
         message = response.choices[0].message
         calls = message.tool_calls or []
         if not calls:
             empty_turns += 1
-            errors.append(
-                f"no tool call on turn {turn_index + 1}: {(message.content or '')[:200]}"
-            )
+            errors.append(f"no tool call on turn {turn_index + 1}: {(message.content or '')[:200]}")
             assistant = {"role": "assistant", "content": message.content or ""}
             messages.append(assistant)
             transcript.append(assistant)
@@ -152,9 +149,8 @@ def rollout(
                 "content": json.dumps(
                     {
                         **result,
-                        "model_turns_remaining": max_turns - len(
-                            [item for item in transcript if item.get("role") == "assistant"]
-                        ),
+                        "model_turns_remaining": max_turns
+                        - len([item for item in transcript if item.get("role") == "assistant"]),
                     },
                     sort_keys=True,
                 ),
@@ -168,9 +164,7 @@ def rollout(
     return {
         "submission": emitted,
         "tool_calls": session.tool_calls,
-        "invalid_proposals": sum(
-            not row.get("valid", False) for row in session.validations
-        ),
+        "invalid_proposals": sum(not row.get("valid", False) for row in session.validations),
         "online_score": session.final_score,
         "errors": errors,
         "transcript": transcript,
@@ -300,10 +294,7 @@ def main() -> int:
         "request_timeout_seconds": args.request_timeout,
         "max_empty_turns": args.max_empty_turns,
         "tasks_sha256": _sha256(args.tasks_dir / f"{args.split}.jsonl"),
-        "stocks_sha256": {
-            stock_id: _sha256(args.stocks_dir / f"{stock_id}.smi")
-            for stock_id in stock_ids
-        },
+        "stocks_sha256": {stock_id: _sha256(args.stocks_dir / f"{stock_id}.smi") for stock_id in stock_ids},
         "tool_schema_sha256": hashlib.sha256(
             json.dumps(TOOLS, sort_keys=True, separators=(",", ":")).encode("utf-8")
         ).hexdigest(),
@@ -313,9 +304,7 @@ def main() -> int:
         if previous_config != run_config:
             raise ValueError("resume configuration differs from the recorded run manifest")
     run_path.parent.mkdir(parents=True, exist_ok=True)
-    run_path.write_text(
-        json.dumps(run_config, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    run_path.write_text(json.dumps(run_config, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     prior_predictions = _read_jsonl(args.output) if args.resume else []
     prediction_by_task: dict[str, dict[str, Any]] = {}
     for row in prior_predictions:
@@ -328,10 +317,7 @@ def main() -> int:
     if unknown_ids:
         raise ValueError(f"resume file contains tasks outside this run: {unknown_ids[:3]}")
     episode_rows = _read_jsonl(episode_path) if args.resume else []
-    reported_cost = sum(
-        float((row.get("usage") or {}).get("reported_cost_usd") or 0.0)
-        for row in episode_rows
-    )
+    reported_cost = sum(float((row.get("usage") or {}).get("reported_cost_usd") or 0.0) for row in episode_rows)
     stopped_for_cost = False
     for task_index, task in enumerate(tasks):
         row = prediction_by_task.setdefault(task.task_id, {"task_id": task.task_id, "attempts": []})
@@ -340,14 +326,10 @@ def main() -> int:
             raise ValueError(f"{task.task_id}: resume attempts must be a list")
         if len(attempts) > args.attempts:
             raise ValueError(
-                f"{task.task_id}: resume file has {len(attempts)} attempts, "
-                f"but --attempts={args.attempts}"
+                f"{task.task_id}: resume file has {len(attempts)} attempts, but --attempts={args.attempts}"
             )
         for sample_index in range(len(attempts), args.attempts):
-            if (
-                args.max_reported_cost_usd is not None
-                and reported_cost >= args.max_reported_cost_usd
-            ):
+            if args.max_reported_cost_usd is not None and reported_cost >= args.max_reported_cost_usd:
                 stopped_for_cost = True
                 break
             session = RetroRouteSession(precedent_index=precedent_index)
@@ -366,12 +348,7 @@ def main() -> int:
                 args.tool_choice,
                 args.max_empty_turns,
             )
-            attempts.append(
-                {
-                    key: attempt[key]
-                    for key in ("submission", "tool_calls", "invalid_proposals")
-                }
-            )
+            attempts.append({key: attempt[key] for key in ("submission", "tool_calls", "invalid_proposals")})
             episode_rows.append(
                 {
                     "task_id": task.task_id,
@@ -384,20 +361,14 @@ def main() -> int:
             )
             reported_cost += float(attempt["usage"]["reported_cost_usd"] or 0.0)
             ordered_predictions = [
-                prediction_by_task[item.task_id]
-                for item in tasks
-                if item.task_id in prediction_by_task
+                prediction_by_task[item.task_id] for item in tasks if item.task_id in prediction_by_task
             ]
             _atomic_write_jsonl(args.output, ordered_predictions)
             _atomic_write_jsonl(episode_path, episode_rows)
         if stopped_for_cost:
             break
 
-    prediction_rows = [
-        prediction_by_task[task.task_id]
-        for task in tasks
-        if task.task_id in prediction_by_task
-    ]
+    prediction_rows = [prediction_by_task[task.task_id] for task in tasks if task.task_id in prediction_by_task]
     _atomic_write_jsonl(args.output, prediction_rows)
     _atomic_write_jsonl(episode_path, episode_rows)
     report = evaluate(
@@ -407,9 +378,7 @@ def main() -> int:
         splits=(args.split,),
     )
     report_path = args.output.with_suffix(".report.json")
-    report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     if stopped_for_cost:
         print(
             f"Stopped before scheduling another attempt: provider-reported cost "

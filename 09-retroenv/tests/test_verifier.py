@@ -1,11 +1,9 @@
 from __future__ import annotations
 
+from conftest import make_task
 from retroenv.chemistry import canonicalize_components, canonicalize_smiles
 from retroenv.models import ReactionStep, ReferenceRoute, RetroTask
 from retroenv.verifier import RouteVerifier
-
-from conftest import make_task
-
 
 STOCK = {"CCO", "CC(=O)O", "CO", "CCBr", "CCCl", "O"}
 

@@ -17,7 +17,6 @@ from fastmcp.tools import Tool
 from openenv.core.env_server.mcp_environment import MCPEnvironment
 from openenv.core.env_server.mcp_types import CallToolObservation
 from openenv.core.env_server.types import EnvironmentMetadata, Observation, State
-
 from retroenv.environment import RetroRouteSession
 from retroenv.tools import tool_spec
 
@@ -55,17 +54,13 @@ class RetroRouteEnvironment(MCPEnvironment):
             pubchem_cache=self.resources.pubchem_cache,
             toolset=settings.toolset,
         )
-        self._state = RetroRouteState(
-            toolset=settings.toolset, max_tool_calls=settings.max_tool_calls
-        )
+        self._state = RetroRouteState(toolset=settings.toolset, max_tool_calls=settings.max_tool_calls)
         self._rng = random.Random()
         mcp = FastMCP("retroenv")
         handlers = self._handlers()
         for name in self.session.tool_names:
             spec = tool_spec(name)
-            tool = Tool.from_function(
-                handlers[name], name=name, description=spec["description"]
-            )
+            tool = Tool.from_function(handlers[name], name=name, description=spec["description"])
             mcp.add_tool(tool.model_copy(update={"parameters": spec["parameters"]}))
         super().__init__(mcp)
 
@@ -84,16 +79,12 @@ class RetroRouteEnvironment(MCPEnvironment):
         def reaction_precedent_search(
             product_smiles: str = "", reaction_class: str = "", limit: int = 10
         ) -> dict[str, Any]:
-            return self._record(
-                session.reaction_precedent_search(product_smiles, reaction_class, limit)
-            )
+            return self._record(session.reaction_precedent_search(product_smiles, reaction_class, limit))
 
         def validate_disconnection(
             product_smiles: str, reactants: list[str] | str, reaction_class: str = ""
         ) -> dict[str, Any]:
-            return self._record(
-                session.validate_disconnection(product_smiles, reactants, reaction_class or None)
-            )
+            return self._record(session.validate_disconnection(product_smiles, reactants, reaction_class or None))
 
         def reaction_class_lookup(product_smiles: str, reactants: list[str] | str) -> dict[str, Any]:
             return self._record(session.reaction_class_lookup(product_smiles, reactants))
@@ -105,14 +96,10 @@ class RetroRouteEnvironment(MCPEnvironment):
             limit: int = 5,
         ) -> dict[str, Any]:
             return self._record(
-                session.reaction_conditions_search(
-                    product_smiles, reactants or [], reaction_class, limit
-                )
+                session.reaction_conditions_search(product_smiles, reactants or [], reaction_class, limit)
             )
 
-        def search_literature(
-            product_smiles: str = "", reaction_class: str = "", limit: int = 5
-        ) -> dict[str, Any]:
+        def search_literature(product_smiles: str = "", reaction_class: str = "", limit: int = 5) -> dict[str, Any]:
             return self._record(session.search_literature(product_smiles, reaction_class, limit))
 
         def emit_routes(submission: Any) -> dict[str, Any]:
@@ -161,9 +148,7 @@ class RetroRouteEnvironment(MCPEnvironment):
             raise IndexError(f"task index {index} is out of range for split {split!r}")
         return {"index": int(index), **tasks[int(index)].to_dict(include_references=False)}
 
-    def get_task_range(
-        self, split: str, start: int | None = None, stop: int | None = None
-    ) -> list[dict[str, Any]]:
+    def get_task_range(self, split: str, start: int | None = None, stop: int | None = None) -> list[dict[str, Any]]:
         indices = range(*slice(start, stop).indices(self.num_tasks(split)))
         return [self.get_task(split, index) for index in indices]
 
@@ -233,9 +218,7 @@ class RetroRouteEnvironment(MCPEnvironment):
         was_done = self.session.done
         return self._mark_terminal(super().step(action, timeout_s=timeout_s, **kwargs), was_done)
 
-    async def step_async(
-        self, action: Any, timeout_s: float | None = None, **kwargs: Any
-    ) -> Observation:
+    async def step_async(self, action: Any, timeout_s: float | None = None, **kwargs: Any) -> Observation:
         was_done = self.session.done
         observation = await super().step_async(action, timeout_s=timeout_s, **kwargs)
         return self._mark_terminal(observation, was_done)

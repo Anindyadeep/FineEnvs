@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import copy
 
+from conftest import make_task
 from retroenv.graph import parse_submission, routes_to_submission
 from retroenv.models import ReferenceRoute, RetroTask
 from retroenv.retrieval import PrecedentIndex, StockIndex, molecule_lookup
 from retroenv.verifier import RouteVerifier
-
-from conftest import make_task
-
 
 STOCK = {"CCO", "CC(=O)O"}
 
 
 def test_reference_round_trip_is_renderable_and_scores_one():
     task = make_task()
-    submission = routes_to_submission(
-        task.target_smiles, task.reference_routes, STOCK, source="oracle-smoke-test"
-    )
+    submission = routes_to_submission(task.target_smiles, task.reference_routes, STOCK, source="oracle-smoke-test")
     parsed = parse_submission(submission)
     assert parsed.parse_valid is True
     assert parsed.trees[0].graph_valid is True
@@ -122,9 +118,7 @@ def test_stock_retrieval_is_exact_and_capped():
 def test_precedent_index_excludes_current_task():
     task = make_task()
     index = PrecedentIndex((task,))
-    assert index.search(task_id=task.task_id, product_smiles=task.target_smiles)[
-        "results"
-    ] == []
+    assert index.search(task_id=task.task_id, product_smiles=task.target_smiles)["results"] == []
 
 
 def test_pubchem_name_lookup_uses_frozen_cache():

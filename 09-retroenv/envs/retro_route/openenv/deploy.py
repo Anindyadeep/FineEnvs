@@ -64,8 +64,9 @@ def main() -> int:
         "RETROENV_TOOLSET": args.toolset,
     }.items():
         api.add_space_variable(args.repo, key, value)
-    api.upload_folder(repo_id=args.repo, repo_type="space", folder_path=staged,
-                      commit_message="Deploy RetroEnv OpenEnv server")
+    api.upload_folder(
+        repo_id=args.repo, repo_type="space", folder_path=staged, commit_message="Deploy RetroEnv OpenEnv server"
+    )
     print(f"https://huggingface.co/spaces/{args.repo}  (add HF_TOKEN as a Space secret)")
     return 0
 
