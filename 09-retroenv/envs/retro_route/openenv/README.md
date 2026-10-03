@@ -50,7 +50,16 @@ From the project folder (`09-retroenv`):
 
 ```bash
 uv sync --extra dev --extra eval
-RETROENV_BENCHMARK_DIR=benchmark/retroeval-v2 uv run uvicorn retroenv_openenv.server:app --port 8000
+RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL uv run bash envs/retro_route/openenv/start.sh
+```
+
+`start.sh` runs `prepare.py`, which downloads the v3 benchmark from
+[AdithyaSK/RetroEnv-RL](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL) and verifies
+its checksums, then starts the server on it. Add `RETROENV_TASKS_SUBDIR=retroeval-v2` to serve
+v2. To serve a local directory instead:
+
+```bash
+RETROENV_BENCHMARK_DIR=benchmark/retroeval-v3 uv run uvicorn retroenv_openenv.server:app --port 8000
 ```
 
 Open <http://localhost:8000/web/> for the playground. To run one model episode against the server:
@@ -60,31 +69,33 @@ uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000
   --split eval --index 0 --provider anthropic --model claude-opus-5-5
 ```
 
-`benchmark/retroeval-v2/tasks-private` is not in git; rebuild it first (see the benchmark README). The committed v1 benchmark (`benchmark/retroeval-v1`) works without a rebuild.
+`tasks-private/` is not in git for v2 and v3; download it from the Hub or rebuild it (see the benchmark READMEs). The committed v1 benchmark (`benchmark/retroeval-v1`) works without either.
 
 ## Docker and Spaces
 
-The image never contains private tasks. At startup `prepare.py` either uses a mounted directory or downloads a private task dataset.
+The image never contains the answer key. At startup `prepare.py` uses a mounted directory or downloads a task dataset; the image defaults to `RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL`.
 
 ```bash
 python deploy.py --stage-only --stage-dir /tmp/retroenv-space
 docker build -t retroenv /tmp/retroenv-space
-docker run --rm -p 8000:8000 -v "$PWD/benchmark/retroeval-v2:/data:ro" \
-  -e RETROENV_BENCHMARK_DIR=/data retroenv
+docker run --rm -p 8000:8000 retroenv                       # v3 from the Hub
+docker run --rm -p 8000:8000 -v "$PWD/benchmark/retroeval-v3:/data:ro" \
+  -e RETROENV_BENCHMARK_DIR=/data retroenv                  # a local directory
 ```
 
-To deploy, upload `tasks-private/`, `stocks/` and `checksums.json` to a private dataset, then run:
+To deploy a Space that serves the published benchmark:
 
 ```bash
-python deploy.py --repo YOUR_ORG/retroenv --tasks-repo YOUR_ORG/retroenv-tasks
+python deploy.py --repo YOUR_ORG/retroenv --tasks-repo AdithyaSK/RetroEnv-RL
 ```
 
-Add `HF_TOKEN` as a Space secret so the Space can read the dataset. The Space is private by default; `--public` makes it public.
+A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space can read it. The Space is private by default; `--public` makes it public.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `RETROENV_BENCHMARK_DIR` | none | Local benchmark directory with `tasks-private/` and `stocks/` |
-| `RETROENV_TASKS_REPO` | none | Private dataset `org/name[@revision]`, used when no directory is set |
+| `RETROENV_TASKS_REPO` | `AdithyaSK/RetroEnv-RL` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
+| `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset, e.g. `retroeval-v2` |
 | `RETROENV_TOOLSET` | `full` | `unaided` removes the tools that answer from hidden references |
 | `RETROENV_MAX_TOOL_CALLS` | `32` | Tool budget per episode |
 | `RETROENV_DEFAULT_SPLIT` | `train` | Split used by a reset that names none |

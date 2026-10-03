@@ -74,3 +74,11 @@ fingerprint comparison is quadratic, the built-in exact comparison refuses
 corpora above 25,000 tasks. Large releases must pre-cluster targets and feed the
 cluster identifier as a source group; disabling the comparison without an
 external audit is not a release-quality configuration.
+
+## SFT export
+
+`build_sft.py` turns `eval/run_eval.py` train-split runs (the scripted reference
+expert or a teacher model) into chat-format SFT rows. Only passed episodes are
+kept. A run or task from dev, eval or stress is an error, and the train tasks
+used are re-audited against the held-out splits before anything is written.
+`train/README.md` gives the full recipe.

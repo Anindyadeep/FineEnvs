@@ -1,28 +1,33 @@
 # Evaluate a model
 
-`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `benchmark/retroeval-v2`).
+`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `benchmark/retroeval-v3`; download it from [AdithyaSK/RetroEnv-RL](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL) or point `--server` at one started with `RETROENV_TASKS_REPO`). The published board is on v2 (`--benchmark-dir benchmark/retroeval-v2`); v3 has none yet.
 
 ```bash
 uv sync --extra dev --extra eval
 
 # Claude, on the Messages API
 uv run python eval/run_eval.py --provider anthropic --model claude-opus-5-5 \
-  --split eval --output runs/v2-eval/claude-opus-5-5
+  --split eval --output runs/v3-eval/claude-opus-5-5
 
 # GPT-5.6, on the Responses API (chat completions rejects tools with reasoning)
-uv run python eval/run_eval.py --provider openai --model gpt-5.6-sol --output runs/v2-eval/gpt-5.6-sol
+uv run python eval/run_eval.py --provider openai --model gpt-5.6-sol --output runs/v3-eval/gpt-5.6-sol
 
 # Open models on the HF router; pin a provider so prices are stable
 uv run python eval/run_eval.py --provider hf --model "deepseek-ai/DeepSeek-V4.1-Flash:novita" \
-  --output runs/v2-eval/deepseek-v4.1-flash
+  --output runs/v3-eval/deepseek-v4.1-flash
 
 # A local vLLM server or any OpenAI-compatible endpoint
 uv run python eval/run_eval.py --provider custom --endpoint http://127.0.0.1:8001/v1 \
-  --model Qwen/Qwen3.5-4B --api-key-env VLLM_KEY --output runs/v2-eval/qwen3.5-4b
+  --model Qwen/Qwen3.5-4B --api-key-env VLLM_KEY --output runs/v3-eval/qwen3.5-4b
+
+# No model: a scripted chemist replays the private reference routes (SFT data; see train/README.md)
+uv run python eval/run_eval.py --provider reference --split train --attempts 2 --output runs/sft/chemist-v3
 
 # Build the table from finished runs
-uv run python eval/summarize.py runs/v2-eval/* --output benchmark/retroeval-v2/results
+uv run python eval/summarize.py runs/v3-eval/* --output benchmark/retroeval-v3/results
 ```
+
+On v2, the six-model board cost $62.5 for 150 eval tasks. v3's 250 eval tasks include 4- and 5-step routes, so expect about twice that.
 
 | Option | Default | Notes |
 |---|---|---|

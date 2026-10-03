@@ -1,262 +1,169 @@
 # 09 · RetroEnv
 
-Plan a retrosynthesis: given a target molecule, work back to molecules you can
-buy. The agent searches a fixed stock and training precedents, checks
-disconnections, and submits molecule/reaction trees. A deterministic verifier
-scores them against patent routes it never shows.
+Plan a retrosynthesis: given a target molecule, work back to molecules you can buy. The
+agent searches a fixed stock and training precedents, checks disconnections, and submits
+molecule/reaction trees. A deterministic verifier scores them against patent routes it
+never shows.
 
-```text
-licensed route trees → normalized references → leak-audited split → hidden tasks
-→ bounded multi-turn tools → route graphs → dense reward → eval
-```
+RDKit and the hidden records establish structural consistency and dataset support. They do
+not establish that a synthesis works experimentally, so results say `dataset_supported`,
+never `experimentally_validated`.
 
-RDKit and the hidden records establish structural consistency and dataset
-support. They do not establish that a synthesis works experimentally, so results
-say `dataset_supported`, never `experimentally_validated`.
-
-## Layout
-
-| Path | What it is |
+| Artifact | Where |
 |---|---|
-| [`envs/retro_route/core`](envs/retro_route/core) | The `retroenv` package: chemistry, stock search, tasks, verifier, tool schemas, and the pure-Python session every front-end shares |
-| [`envs/retro_route/openenv`](envs/retro_route/openenv) | The OpenEnv server, client, agent loops, playground and Docker/Space deployment |
-| [`dataset/`](dataset) | Mining, task building, difficulty labels, and the audit |
-| [`eval/`](eval) | `run_eval.py` through the server, plus the v1 board tools |
-| [`benchmark/`](benchmark) | `retroeval-v1` (100 tasks, committed with references) and [`retroeval-v2`](benchmark/retroeval-v2) (1,000 tasks) |
-| [`train/`](train) | The TRL GRPO smoke recipe |
-| [`web/`](web) | Static explorer for the v1 board trajectories |
+| RL tasks: the v3 benchmark (28,039 tasks), v2 and its model board | [AdithyaSK/RetroEnv-RL](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL) |
+| SFT trajectories for the v3 train split | [AdithyaSK/RetroEnv-SFT](https://huggingface.co/datasets/AdithyaSK/RetroEnv-SFT) |
+| Explainer video (83 s) | [`media/retroenv-explainer.mp4`](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL/blob/main/media/retroenv-explainer.mp4) |
+| Local explorer for tasks, SFT rows and model runs | [`explorer/`](explorer) |
+| Visual guide to one RL task and one SFT row | [`docs/training-data.html`](docs/training-data.html) (open in a browser) |
+| What was built, and what is next | [`HANDOFF.md`](HANDOFF.md) |
 
-## Benchmarks
-
-`benchmark/retroeval-v2` is the current set: 1,000 tasks, at most 3 steps, every
-leaf in the frozen 13,432-molecule n1 stock. Its private references are rebuilt
-rather than committed; see [its README](benchmark/retroeval-v2/README.md) for the
-splits, the selection rules and the rebuild.
-
-| Set | Tasks | train / dev / eval / stress | References in git |
-|---|---:|---:|---|
-| `retroeval-v1` | 100 | 40 / 20 / 20 / 20 | Yes |
-| `retroeval-v2` | 1,000 | 600 / 100 / 150 / 150 | No, rebuilt from the scripts |
-
-Both pass `dataset/audit_benchmark.py`: no target, scaffold, intermediate,
-reaction, patent or near-duplicate at Morgan Tanimoto ≥ 0.90 crosses a split,
-and every reference route and oracle graph replays through the serving verifier.
-
-## Run it
+## Quick start
 
 ```bash
 uv sync --extra dev --extra eval
 uv run pytest
 
-RETROENV_BENCHMARK_DIR=benchmark/retroeval-v2 uv run uvicorn retroenv_openenv.server:app --port 8000
+# Serve v3 from the Hub (also the Docker image's default)
+RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL uv run bash envs/retro_route/openenv/start.sh
 ```
 
-Open <http://localhost:8000/web/> to try a task by hand; the API is at `/docs`.
-One model episode against that server:
+The server is at <http://localhost:8000>: a hand-play UI at `/web/`, the API at `/docs`. One
+model episode, then a whole split:
 
 ```bash
 uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000 \
   --split eval --index 0 --provider anthropic --model claude-opus-5-5
+uv run python eval/run_eval.py --provider anthropic --model claude-opus-5-5 \
+  --server http://127.0.0.1:8000 --split eval --output runs/v3-eval/claude-opus-5-5
 ```
 
-A whole split, with a server started for you:
+To browse everything, download the benchmark and start the explorer:
 
 ```bash
-uv run python eval/run_eval.py --provider anthropic --model claude-opus-5-5 \
-  --split eval --output runs/v2-eval/claude-opus-5-5
-uv run python eval/summarize.py runs/v2-eval/* --output benchmark/retroeval-v2/results
+hf download AdithyaSK/RetroEnv-RL --repo-type dataset --local-dir benchmark/retroeval-v3 \
+  --exclude "retroeval-v2/*" "runs/*" "media/*"
+uv run --extra eval python explorer/server.py      # http://127.0.0.1:8050
 ```
 
-See [`envs/retro_route/openenv/README.md`](envs/retro_route/openenv/README.md) for
-the server, Docker and Space deployment, and [`eval/README.md`](eval/README.md)
-for providers, resuming and cost caps.
+## Layout
 
-## Harness
-
-`reset(split=..., index=...)` is deterministic and returns only the target,
-budgets, stock ID, prompt, and tool names. It never returns a reference route,
-reference count, patent ID, or answer-bearing metadata. Stock is not embedded
-in the prompt. Tools are MCP calls, capped at 32 per episode
-(`RETROENV_MAX_TOOL_CALLS`); `emit_routes` always stays available, and the step
-that calls it carries `done` and the reward.
-
-`RETROENV_TOOLSET=unaided` removes `validate_disconnection` and
-`reaction_class_lookup`, and stops `reaction_conditions_search` answering from a
-matched hidden record. Those three are the only tools that consult this task's
-references, so the unaided surface measures retrosynthesis without an answer
-oracle. Scores from the two toolsets are not comparable.
-
-| Tool | Deterministic rollout behavior |
+| Path | What it is |
 |---|---|
-| `inspect_molecule` | RDKit formula, scaffold, rings, charge, and stereo |
-| `pubchem_lookup` | Canonicalize SMILES locally; name/CAS requires a frozen cache |
-| `stock_retrieve` | Only stock access; exact/InChIKey/class/SMARTS/similarity, cap 20 |
-| `reaction_precedent_search` | Capped analogues from the **train split only** |
-| `validate_disconnection` | Check an agent-supplied cut without returning a route |
-| `reaction_class_lookup` | Class attached to a supported supplied cut, or `unclassified` |
-| `reaction_conditions_search` | Frozen conditions from evidence/analogues |
-| `search_literature` | Frozen patent/citation metadata; never live web during rollout |
-| `emit_routes` | The only terminal action; parse, verify, and score 1–5 trees |
+| [`envs/retro_route/core`](envs/retro_route/core) | The `retroenv` package: chemistry, stock search, tasks, verifier, tool schemas, the disconnection library, and the session every front-end shares |
+| [`envs/retro_route/openenv`](envs/retro_route/openenv) | The OpenEnv server, client, agent loops (including the scripted chemist), hand-play UI and Docker/Space deployment |
+| [`dataset/`](dataset) | Mining, the v2 and v3 builders, difficulty labels, the audit, and the SFT exporter |
+| [`eval/`](eval) | `run_eval.py` through the server, baselines and summaries |
+| [`train/`](train) | SFT and GRPO recipes |
+| [`benchmark/`](benchmark) | `retroeval-v1` (100 tasks, with references), [`retroeval-v2`](benchmark/retroeval-v2) and [`retroeval-v3`](benchmark/retroeval-v3); answers come from the Hub |
+| [`explorer/`](explorer) | Local browser for benchmarks, SFT datasets and model runs, with live play |
+| [`sample/`](sample) | A six-task bundle for smoke tests |
 
-Live web and supplier-price search are intentionally absent from the current
-rollout boundary. Network changes would make episodes non-replayable. They can
-be used during dataset hydration and snapshotted before a future release.
-Name/CAS support follows that rule: run
-`python dataset/hydrate_pubchem.py queries.txt cache/pubchem.json`, then set
-`RETROENV_PUBCHEM_CACHE=cache/pubchem.json` when serving.
+## Benchmarks
 
-The final submission is always renderable graph JSON:
+| Set | Tasks | train / dev / eval / stress | Routes | Status |
+|---|---:|---:|---|---|
+| [`retroeval-v3`](benchmark/retroeval-v3) | 28,039 | 27,489 / 150 / 250 / 150 | 2–5 steps | current; no model board yet |
+| [`retroeval-v2`](benchmark/retroeval-v2) | 1,000 | 600 / 100 / 150 / 150 | 2–3 steps | has the six-model board |
+| `retroeval-v1` | 100 | 40 / 20 / 20 / 20 | — | first board, kept for reference |
 
-```json
-{
-  "schema_version": "retro-route-graph-v1",
-  "routes": [
-    {
-      "type": "mol",
-      "smiles": "CCOC(C)=O",
-      "in_stock": false,
-      "children": [
-        {
-          "type": "reaction",
-          "is_reaction": true,
-          "metadata": {
-            "explanation": "Dataset-supported ester disconnection.",
-            "reaction_class": "esterification",
-            "confidence": 0.9,
-            "literature": [],
-            "precursor_roles": {"CCO": "alcohol", "CC(=O)O": "acid"}
-          },
-          "children": [
-            {"type": "mol", "smiles": "CCO", "in_stock": true, "children": []},
-            {"type": "mol", "smiles": "CC(=O)O", "in_stock": true, "children": []}
-          ]
-        }
-      ]
-    }
-  ]
-}
-```
+v3's eval split was designed rather than sampled. It has 70 / 70 / 60 / 50 tasks with 2 / 3 /
+4 / 5 steps, all ten first-step reaction families and four molecule-size bins. No held-out
+task shares a target, scaffold, intermediate, reaction, patent or near-duplicate with train
+or with another held-out task. Every set passes `dataset/audit_benchmark.py`.
 
-A leaf claim is rewarded only when it agrees with exact stock membership. The
-route score shown per tree is its weakest verified step, while the episode
-reward covers the whole submitted route set.
+## The environment
+
+`reset(split=..., index=...)` is deterministic and returns only the target, the budgets, the
+stock ID, the prompt and the tool names: never a reference route, its patent or its count.
+The stock is not in the prompt. An episode allows 32 tool calls (`RETROENV_MAX_TOOL_CALLS`)
+and ends with `emit_routes`, whose step carries `done` and the reward.
+
+| Tool | What it does |
+|---|---|
+| `inspect_molecule` | RDKit formula, scaffold, rings, charge and stereo |
+| `pubchem_lookup` | Canonicalize SMILES locally; names and CAS numbers need a frozen cache |
+| `stock_retrieve` | The only stock access: exact, InChIKey, class, SMARTS or similarity, at most 20 results |
+| `reaction_precedent_search` | Analogues from the train split, minus anything sharing a leakage group with the task |
+| `validate_disconnection` | Check a proposed cut against the hidden evidence, without revealing the route |
+| `reaction_class_lookup` | The class of a supported cut |
+| `reaction_conditions_search` | Reported conditions for a supported cut, or from analogues |
+| `search_literature` | Frozen citation metadata from training precedents |
+| `emit_routes` | Submit one to five route trees; terminal |
+
+`RETROENV_TOOLSET=unaided` removes `validate_disconnection` and `reaction_class_lookup`, and
+stops `reaction_conditions_search` answering from the hidden record, so the agent has no
+answer oracle. Scores from the two toolsets are not comparable.
+
+A submission is a list of molecule → reaction → molecule trees. Each reaction carries
+metadata: an explanation, the reaction class, a confidence, literature and precursor roles.
+A leaf earns credit for `in_stock: true` only if it is in the stock.
 
 ## Reward
 
-The terminal verifier is tolerant enough to train weak policies: malformed or
-partial outputs do not collapse all groups to the same value. Passing status is
-still strict—route-count compliance and at least `min_routes` fully supported,
-stock-closed routes with distinct first cuts are required.
+The verifier is graded, so weak policies still see a signal, but passing is strict: the
+right number of routes, each fully supported and stock-closed, with distinct first cuts.
 
 | Component | Weight |
 |---|---:|
 | JSON parse validity | 0.05 |
 | Valid RDKit molecules | 0.10 |
-| Alternating, connected target-rooted graph | 0.10 |
-| Supported/atom-conserving steps | 0.20 |
+| Alternating, connected, target-rooted graph | 0.10 |
+| Supported, atom-conserving steps | 0.20 |
 | Truthful, complete stock leaves | 0.10 |
-| Best reference-route similarity | 0.10 |
-| Exact match to any reference | 0.10 |
+| Similarity to the closest reference route | 0.10 |
+| Exact match to a reference route | 0.10 |
 | Verified distinct first cuts | 0.10 |
-| Required route-set cardinality | 0.15 |
+| Required number of routes | 0.15 |
 
-The legacy flat-route verifier remains hard-gated for compatibility. New
-training uses `emit_routes` and the dense graph score. Unsupported chemistry,
-valid-looking SMILES, or fluent explanations cannot earn the high-value
-correctness components.
+The oracle scores 1.000, and an empty submission scores 0.050 (`eval/run_baselines.py`).
 
-Sanity baselines are generated from private references only to test plumbing:
+## Training data
 
-```bash
-uv run python eval/run_baselines.py
-```
+- **RL:** the 27,489 v3 train tasks. A train task's precedent search hides what the split hides
+  from an eval task (its own reactions, patent, scaffolds and near-duplicates), so RL cannot
+  learn to copy answers. `MAX_ROUTE_STEPS` in `train/grpo_smoke.py` sets a curriculum by
+  route length.
+- **SFT:** episodes from a scripted chemist that knows each patent route and acts through the
+  real server. It inspects the target and searches precedents, sometimes tries a plausible
+  wrong cut and recovers, checks every piece against the stock, and writes up each reaction
+  with its evidence. Every row passed the verifier. The `chemist` config has 32,220 rows over
+  all train tasks, 46% of them recovering from a rejected cut. `train/sft_smoke.py` trains on
+  it, with loss on the assistant turns only.
 
-Expected result: oracle ceiling `1.000/pass`, one-route ablation `0.788/fail`,
-and empty graph floor `0.050/fail`. These are not model baselines.
+[`train/README.md`](train/README.md) has both recipes, and the dataset card explains how the
+rows were made.
 
-## The v1 board
+## Results
 
-The v1 board (20 tasks, run in-process over OpenRouter) used `eval/run_model.py`:
+The v2 board covers 150 eval tasks, one attempt each, with the full toolset. Pass@1: Claude
+Opus 5.5 0.560, Claude Sonnet 5.5 0.300, GPT-5.6 Sol 0.280, DeepSeek V4.1 Flash 0.107, GPT-5.6
+Luna 0.073 and Qwen3.8 27B 0.013. Every model drops on 3-step routes. Opus refused 16% of
+episodes, which score the floor. See
+[`benchmark/retroeval-v2/results/RESULTS.md`](benchmark/retroeval-v2/results/RESULTS.md).
 
-```bash
-uv run python eval/run_model.py \
-  --endpoint http://127.0.0.1:8001/v1 \
-  --model Qwen/Qwen3.5-4B \
-  --split dev --attempts 4 \
-  --output sample/model-runs/qwen-dev.jsonl
-```
-
-The runner records raw transcripts separately, stores submissions, writes a
-hash-pinned run manifest, checkpoints each paid attempt, and can resume after a
-provider failure. It forces the final turn to expose only `emit_routes`, then
-recomputes Pass@1/Pass@k and every component offline against private truth.
-Reports include Wilson 95% intervals for pass rates. To score an existing
-prediction file:
+## Rebuilding the data
 
 ```bash
-uv run retroenv-eval \
-  --tasks-dir sample/tasks-private \
-  --stocks-dir sample/stocks \
-  --predictions predictions.jsonl \
-  --split eval --k 1 4 8
+uv run python dataset/mine_route_pool.py --max-steps 5 --output .local/pool/pool-n1-s5.jsonl
+uv run python dataset/build_benchmark_v3.py --output-dir benchmark/retroeval-v3
+uv run python dataset/label_difficulty.py --benchmark-dir benchmark/retroeval-v3
+uv run python dataset/audit_benchmark.py --benchmark-dir benchmark/retroeval-v3 \
+  --expected-eval-tasks 250 --manifest-rules
 ```
 
-The current 20-task model board is in
-[`benchmark/retroeval-v1/model-runs/board-v1/RESULTS.md`](benchmark/retroeval-v1/model-runs/board-v1/RESULTS.md).
-
-The static benchmark explainer and trajectory explorer is under `web/`. It
-contains all 160 completed episodes, model/task selectors, compact tool traces,
-and interactive submitted-route DAGs without exposing private references:
-
-```bash
-uv run python web/build_data.py
-uv run python -m http.server 8080 --directory web
-```
-
-Open <http://localhost:8080> or open `web/index.html` directly.
-
-For the first GRPO experiment, overfit a handful of training tasks before scaling:
-use deterministic `(split, index)` reset, 4–8 rollouts per group, and monitor
-within-task reward standard deviation—not only mean reward. The environment
-server used for training must be the same image and private task bundle used for
-evaluation. A trainer should persist raw tool episodes so graph/reward failures
-can be replayed.
-
-## Full data pipeline
-
-The workspace already has about 6.5 GB of raw artifacts covering ORD, Lowe
-USPTO, CRD, USPTO-LLM, CREED/CREED-CCV, FREA/RxnVerif, PaRoutes, and SynRXN.
-The registry distinguishes approved, non-commercial, research-only, and pending
-sources; “download everything” never means scraping proprietary or
-license-unknown data.
-
-```bash
-python dataset/download_raw.py --include-research-only
-python dataset/inventory_raw.py
-
-retroenv-prepare-source paroutes_v2 \
-  data/raw/paroutes-v2-benchmark build/paroutes-n1.routes.jsonl --release n1
-
-retroenv-build-tasks \
-  --routes build/paroutes-n1.routes.jsonl \
-  --stock-file data/raw/paroutes-v2-benchmark/stock_n1.txt \
-  --stock-id paroutes-v2-n1 \
-  --output-dir build/paroutes-n1-tasks
-```
-
-The larger dry run produced 7,123 provenance-backed 1–3 step tasks with zero
-audited crossings. See `dataset/README.md` for normalization, deduplication,
-evidence labels, licensing, and why flat reaction rows are never globally
-joined into invented multi-step routes.
+Each build is deterministic and checked against `checksums.json`. The SFT data then comes
+from `eval/run_eval.py --provider reference` and `dataset/build_sft.py`; see
+[`train/README.md`](train/README.md). [`dataset/README.md`](dataset/README.md) covers the raw
+sources, their licences and the corpus contract. [`RESEARCH.md`](RESEARCH.md) has the source
+and verifier evidence.
 
 ## Design basis
 
-The implementation follows the data-first lessons in the
-[FineEnvs GeoGuesser environment article](https://huggingface.co/spaces/FineEnvs/geoguesser-article):
-freeze a small eval early, define contamination at the correct grouping unit,
-make reset indexable, keep truth inside the environment, provide continuous
-reward, simulate full rollouts before GPU training, overfit a few tasks first,
-use the same hosted environment for train/eval, and preserve raw episodes.
+This follows the data-first lessons of the
+[FineEnvs GeoGuesser article](https://huggingface.co/spaces/FineEnvs/geoguesser-article):
 
-See `RESEARCH.md` for source and verifier evidence, and `dataset/README.md` for
-the corpus contract.
+- freeze a small eval early, and define contamination at the right grouping unit;
+- make reset indexable, keep the truth inside the environment, and give a continuous reward;
+- simulate full rollouts before GPU training, and overfit a few tasks first;
+- use the same hosted environment for training and evaluation, and keep the raw episodes.

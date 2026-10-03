@@ -8,7 +8,9 @@ status: wip
 hub:
   org: FineEnvs
   spaces: []
-  datasets: []
+  datasets:
+    - AdithyaSK/RetroEnv-RL    # v3 benchmark (RL tasks and answer key), v2 and its model board
+    - AdithyaSK/RetroEnv-SFT   # SFT trajectories for the v3 train split
 
 envs:
   - name: retro_route
