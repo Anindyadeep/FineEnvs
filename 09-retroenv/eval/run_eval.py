@@ -8,6 +8,10 @@ port for ``--benchmark-dir`` and stops it at the end.
     uv run --extra eval python eval/run_eval.py --provider anthropic \\
         --model claude-opus-5-5 --split eval --output runs/v2-eval/opus-5-5
 
+``--provider reference`` runs no model: a scripted expert replays each task's
+private reference routes through the same loop and server. That is the SFT
+trajectory generator; see ``dataset/build_sft.py``.
+
 Output directory:
     identity.json   model, sampling, tasks and code hashes; a rerun must match
     episodes/       one JSON per task and attempt, with the full transcript
@@ -37,7 +41,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 import httpx
-from retroenv_openenv import agent, agent_anthropic, agent_responses
+from retroenv_openenv import agent, agent_anthropic, agent_reference, agent_responses
 from retroenv_openenv.client import RetroEnvClient
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -67,6 +71,8 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "token_param": "max_tokens",
         "temperature": 0.0,
     },
+    # No model and no key: the scripted expert reads <benchmark-dir>/tasks-private.
+    "reference": {"backend": "reference", "key": None},
 }
 
 
@@ -233,12 +239,12 @@ def recompute(output: Path) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--provider", choices=sorted(PROVIDERS), required=True)
-    parser.add_argument("--model", required=True)
+    parser.add_argument("--model", help="required unless --provider reference")
     parser.add_argument("--label", help="display name in summaries (defaults to the model)")
     parser.add_argument("--endpoint", help="OpenAI-compatible base URL (custom provider, or an override)")
     parser.add_argument("--api-key-env", help="environment variable holding the API key")
     parser.add_argument("--server", help="URL of a running RetroEnv server; default starts a local one")
-    parser.add_argument("--benchmark-dir", type=Path, default=ROOT / "benchmark" / "retroeval-v2")
+    parser.add_argument("--benchmark-dir", type=Path, default=ROOT / "benchmark" / "retroeval-v3")
     parser.add_argument(
         "--toolset",
         choices=("full", "unaided"),
@@ -276,11 +282,15 @@ def main() -> int:
         parser.error(
             f"--temperature is not supported by the {args.provider} backend; use --effort or --reasoning-effort"
         )
+    if preset["backend"] == "reference":
+        args.model = args.model or agent_reference.MODEL
+    elif not args.model:
+        parser.error("--model is required")
     key_env = args.api_key_env or preset["key"]
-    if not os.getenv(key_env):
+    if key_env and not os.getenv(key_env):
         parser.error(f"{key_env} is not set")
     endpoint = args.endpoint or preset.get("endpoint")
-    if preset["backend"] != "anthropic" and not endpoint:
+    if preset["backend"] not in ("anthropic", "reference") and not endpoint:
         parser.error("--endpoint is required for the custom provider")
     pricing = json.loads((ROOT / "eval" / "pricing.json").read_text())
 
@@ -296,6 +306,11 @@ def main() -> int:
         )
         backend = agent_anthropic.run_episode
         sampling = {"max_tokens": config.max_tokens, "effort": config.effort, "tool_choice": "auto"}
+    elif preset["backend"] == "reference":
+        llm = agent_reference.ReferenceTasks(args.benchmark_dir)
+        config = agent.AgentConfig(model=args.model, max_turns=args.max_turns, temperature=None)
+        backend = agent_reference.run_episode
+        sampling = {"policy": "scripted reference expert"}
     elif preset["backend"] == "responses":
         from openai import OpenAI
 
@@ -356,7 +371,9 @@ def main() -> int:
         probe.call("emit_routes", {"submission": {"routes": []}})
         probe.close()
 
-        code = b"".join(Path(module.__file__).read_bytes() for module in (agent, agent_anthropic, agent_responses))
+        code = b"".join(
+            Path(module.__file__).read_bytes() for module in (agent, agent_anthropic, agent_reference, agent_responses)
+        )
         identity = {
             "schema_version": "retro-eval-run-v2",
             "provider": args.provider,
@@ -432,6 +449,8 @@ def main() -> int:
                 "depth": task["max_steps"],
                 "tier": tiers.get(task["task_id"]),
                 "target_smiles": task["target_smiles"],
+                # The OpenAI-format transcript starts after the opening prompt; SFT export needs it.
+                "prompt": opening["prompt"],
                 "graded": not infra,
                 **result,
             }
