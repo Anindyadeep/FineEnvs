@@ -3,12 +3,12 @@
 
     python deploy.py --stage-only --stage-dir /tmp/retroenv-space   # build locally
     docker build -t retroenv /tmp/retroenv-space
-    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo YOUR_ORG/retroenv-tasks
+    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo AdithyaSK/RetroEnv-RL
 
 The Space gets Dockerfile and README.md at its root, with core/ and openenv/
 beside them, the same layout the Dockerfile builds locally from envs/retro_route.
-Private tasks are not uploaded: the Space downloads them at startup from
---tasks-repo, a private dataset, using an HF_TOKEN Space secret.
+The answer key is not uploaded with the Space: it downloads the task dataset
+named by --tasks-repo at startup (an HF_TOKEN Space secret if that dataset is private).
 """
 
 from __future__ import annotations
@@ -38,7 +38,10 @@ def stage(target: Path) -> Path:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--repo", help="Space id, e.g. FineEnvs/retroenv")
-    parser.add_argument("--tasks-repo", help="private dataset with tasks-private/ and stocks/ (org/name[@revision])")
+    parser.add_argument(
+        "--tasks-repo",
+        help="task dataset with tasks-private/ and stocks/ (org/name[@revision]), e.g. AdithyaSK/RetroEnv-RL",
+    )
     parser.add_argument("--public", action="store_true", help="create the Space public (default private)")
     parser.add_argument("--concurrency", type=int, default=64)
     parser.add_argument("--toolset", choices=("full", "unaided"), default="full")
@@ -67,7 +70,7 @@ def main() -> int:
     api.upload_folder(
         repo_id=args.repo, repo_type="space", folder_path=staged, commit_message="Deploy RetroEnv OpenEnv server"
     )
-    print(f"https://huggingface.co/spaces/{args.repo}  (add HF_TOKEN as a Space secret)")
+    print(f"https://huggingface.co/spaces/{args.repo}  (add HF_TOKEN as a Space secret if the task dataset is private)")
     return 0
 
 

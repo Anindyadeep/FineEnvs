@@ -1,13 +1,16 @@
 #!/usr/bin/env python3
-"""Make the private task bundle available before the server starts.
+"""Make the task bundle available before the server starts.
 
 The bundle is a benchmark directory (``tasks-private/``, ``stocks/`` and,
 optionally, ``checksums.json``) as written by the dataset scripts. It holds
 the reference routes, so it is never baked into the image:
 
 * ``RETROENV_BENCHMARK_DIR`` set: use that directory as is (local runs).
-* ``RETROENV_TASKS_REPO=org/name[@revision]``: download that private HF
-  dataset into ``RETROENV_PREPARED_DIR`` (default ``prepared``) with HF_TOKEN.
+* ``RETROENV_TASKS_REPO=org/name[@revision]``: download that HF dataset into
+  ``RETROENV_PREPARED_DIR`` (default ``prepared``). The published benchmark is
+  ``AdithyaSK/RetroEnv-RL``: v3 at its root, v2 under ``retroeval-v2/``
+  (``RETROENV_TASKS_SUBDIR=retroeval-v2``). ``HF_TOKEN`` is needed only for a
+  private repo.
 
 Either way, files listed in ``checksums.json`` are verified.
 """
@@ -45,23 +48,33 @@ def main() -> int:
     local = os.getenv("RETROENV_BENCHMARK_DIR")
     if local:
         verify(Path(local))
+        print(local)
         return 0
     repo = os.getenv("RETROENV_TASKS_REPO")
     if not repo:
-        raise SystemExit("Set RETROENV_BENCHMARK_DIR, or RETROENV_TASKS_REPO to a private task dataset.")
+        raise SystemExit(
+            "Set RETROENV_BENCHMARK_DIR, or RETROENV_TASKS_REPO to a task dataset (for example AdithyaSK/RetroEnv-RL)."
+        )
     from huggingface_hub import snapshot_download
 
     repo_id, _, revision = repo.partition("@")
-    target = Path(os.getenv("RETROENV_PREPARED_DIR", "prepared"))
+    subdir = os.getenv("RETROENV_TASKS_SUBDIR", "").strip("/")
+    prefix = f"{subdir}/" if subdir else ""
+    download = Path(os.getenv("RETROENV_PREPARED_DIR", "prepared"))
     snapshot_download(
         repo_id,
         repo_type="dataset",
         revision=revision or None,
-        local_dir=target,
-        allow_patterns=["tasks-private/*", "stocks/*", "checksums.json", "manifest.json"],
-        token=os.getenv("HF_TOKEN"),
+        local_dir=download,
+        allow_patterns=[
+            f"{prefix}{name}" for name in ("tasks-private/*", "stocks/*", "checksums.json", "manifest.json")
+        ],
+        token=os.getenv("HF_TOKEN") or None,
     )
+    target = download / subdir if subdir else download
     verify(target)
+    # start.sh serves whatever this prints last.
+    print(target)
     return 0
 
 
