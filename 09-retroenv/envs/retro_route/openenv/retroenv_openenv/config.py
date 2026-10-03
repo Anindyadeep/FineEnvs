@@ -17,6 +17,7 @@ from typing import Any
 
 from retroenv.retrieval import PrecedentIndex, cached_stock_index
 from retroenv.store import TaskStore
+from retroenv.taskgen import split_rules
 from retroenv.tools import tool_names
 
 ENV_NAME = "retro_route"
@@ -88,7 +89,8 @@ class Resources:
         return cls(
             settings=settings,
             store=store,
-            precedent_index=PrecedentIndex(training),
+            # The split rules let the index hide from a train task what the split hid from eval.
+            precedent_index=PrecedentIndex(training, **split_rules(settings.tasks_dir)),
             pubchem_cache=_load_pubchem_cache(settings.pubchem_cache),
         )
 

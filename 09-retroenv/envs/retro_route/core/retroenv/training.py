@@ -12,6 +12,7 @@ from typing import Any
 from .environment import RetroRouteSession
 from .retrieval import PrecedentIndex
 from .store import TaskStore
+from .taskgen import split_rules
 
 _TRACE_LOCK = threading.Lock()
 
@@ -20,7 +21,7 @@ _TRACE_LOCK = threading.Lock()
 def _resources(tasks_dir: str, stocks_dir: str) -> tuple[TaskStore, PrecedentIndex]:
     store = TaskStore(tasks_dir, stocks_dir)
     training_tasks = store.tasks("train") if "train" in store.splits() else ()
-    return store, PrecedentIndex(training_tasks)
+    return store, PrecedentIndex(training_tasks, **split_rules(tasks_dir))
 
 
 class RetroRouteTrainingEnv:

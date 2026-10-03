@@ -9,7 +9,7 @@ from typing import Any, Iterable
 from rdkit import Chem, DataStructs
 from rdkit.Chem import Descriptors, rdFingerprintGenerator, rdMolDescriptors
 
-from .chemistry import canonical_step_key, canonicalize_smiles
+from .chemistry import canonical_step_key, canonicalize_smiles, scaffold_group_key
 from .models import RetroTask
 
 CLASS_SMARTS = {
@@ -36,12 +36,38 @@ class Precedent:
     conditions: tuple[dict[str, Any], ...]
     literature: tuple[dict[str, Any], ...]
     source: tuple[dict[str, Any], ...]
+    # Leakage keys in the namespaces of the split rules: molecule, scaffold, reaction, source.
+    keys: frozenset[tuple[str, str]] = frozenset()
+
+
+def _sources(route) -> set[tuple[str, str]]:
+    return {("source", f"{s.get('name', '')}:{s['group_id']}") for s in route.source if s.get("group_id")}
 
 
 class PrecedentIndex:
-    """Search training-visible reaction steps without exposing eval references."""
+    """Search training-visible reaction steps without exposing eval references.
 
-    def __init__(self, tasks: Iterable[RetroTask]):
+    An eval task never meets its own reactions, its patent, its scaffolds or a
+    near-duplicate here, because the split kept all of them out of train. Given
+    the ``task``, ``search`` hides the same things from a train task, so a policy
+    trained on train cannot learn to look up answers that evaluation never offers.
+    ``exact_single_ring`` and ``generic`` must be the benchmark's own split rules
+    (``taskgen.audit_rules``); with them, nothing is hidden from a held-out task.
+    """
+
+    def __init__(
+        self,
+        tasks: Iterable[RetroTask],
+        *,
+        exact_single_ring_scaffolds: bool = False,
+        generic_scaffolds: frozenset[str] = frozenset(),
+        near_duplicate_threshold: float = 0.90,
+    ):
+        self._scaffold = lambda smiles: scaffold_group_key(
+            smiles, exact_single_ring=exact_single_ring_scaffolds, generic=generic_scaffolds
+        )
+        self.near_duplicate_threshold = near_duplicate_threshold
+        self._hidden: dict[str, frozenset[int]] = {}
         records: list[Precedent] = []
         seen: set[str] = set()
         for task in tasks:
@@ -51,16 +77,21 @@ class PrecedentIndex:
                     if key in seen:
                         continue
                     seen.add(key)
+                    product = canonicalize_smiles(step.product)
+                    keys = {("molecule", product), ("scaffold", self._scaffold(product)), *_sources(route)}
+                    if step.reaction_id:
+                        keys.add(("reaction", step.reaction_id))
                     records.append(
                         Precedent(
                             task_id=task.task_id,
-                            product=canonicalize_smiles(step.product),
+                            product=product,
                             reactants=tuple(step.reactants),
                             reaction_class=step.reaction_class,
                             reaction_id=step.reaction_id,
                             conditions=step.conditions,
                             literature=step.literature,
                             source=route.source,
+                            keys=frozenset(keys),
                         )
                     )
         self.records = tuple(records)
@@ -70,6 +101,28 @@ class PrecedentIndex:
         )
         self._generator = generator
 
+    def hidden(self, task: RetroTask) -> frozenset[int]:
+        """Indexes of records that share a leakage key with ``task`` or near-duplicate one of its molecules."""
+        cached = self._hidden.get(task.task_id)
+        if cached is not None:
+            return cached
+        molecules = {canonicalize_smiles(task.target_smiles)} | {
+            canonicalize_smiles(step.product) for route in task.reference_routes for step in route.steps
+        }
+        keys = {("molecule", m) for m in molecules} | {("scaffold", self._scaffold(m)) for m in molecules}
+        for route in task.reference_routes:
+            keys |= _sources(route)
+            keys |= {("reaction", step.reaction_id) for step in route.steps if step.reaction_id}
+        hidden = {i for i, record in enumerate(self.records) if record.keys & keys}
+        if self._fingerprints and self.near_duplicate_threshold > 0:
+            for smiles in molecules:
+                fingerprint = self._generator.GetFingerprint(Chem.MolFromSmiles(smiles))
+                similarities = DataStructs.BulkTanimotoSimilarity(fingerprint, self._fingerprints)
+                hidden.update(i for i, value in enumerate(similarities) if value >= self.near_duplicate_threshold)
+        cached = frozenset(hidden)
+        self._hidden[task.task_id] = cached
+        return cached
+
     def search(
         self,
         *,
@@ -77,6 +130,7 @@ class PrecedentIndex:
         product_smiles: str | None = None,
         reaction_class: str | None = None,
         limit: int = 10,
+        task: RetroTask | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 20))
         query_fp = None
@@ -85,9 +139,10 @@ class PrecedentIndex:
             canonical_product = canonicalize_smiles(product_smiles)
             query_fp = self._generator.GetFingerprint(Chem.MolFromSmiles(canonical_product))
         normalized_class = _normalize_class(reaction_class)
+        hidden = self.hidden(task) if task is not None else frozenset()
         ranked: list[tuple[float, str, Precedent]] = []
-        for record, fingerprint in zip(self.records, self._fingerprints):
-            if record.task_id == task_id:
+        for index, (record, fingerprint) in enumerate(zip(self.records, self._fingerprints)):
+            if record.task_id == task_id or index in hidden:
                 continue
             if normalized_class and _normalize_class(record.reaction_class) != normalized_class:
                 continue

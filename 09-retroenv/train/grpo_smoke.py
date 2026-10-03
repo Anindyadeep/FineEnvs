@@ -28,22 +28,28 @@ NUM_GENERATIONS = int(os.getenv("NUM_GENERATIONS", "4"))
 MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))
 SEED = int(os.getenv("SEED", "17"))
 SERVER = os.getenv("RETROENV_SERVER")
+# Curriculum: train only on tasks whose route needs at most this many steps
+# (v3 has 2- to 5-step tasks); raise it once the shorter ones are solved.
+MAX_ROUTE_STEPS = int(os.getenv("MAX_ROUTE_STEPS", "99"))
 
 
-def train_size() -> int:
+def train_route_steps() -> list[int]:
+    """Each train task's step budget, in index order (a public field)."""
     if SERVER:
         with RetroEnvClient(SERVER) as client:
-            return client.num_tasks("train")
+            return [int(task["max_steps"]) for task in client.tasks("train")]
     root = Path(__file__).resolve().parents[1]
     store = TaskStore(
         os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"),
         os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"),
     )
-    return len(store.tasks("train"))
+    return [task.max_steps for task in store.tasks("train")]
 
 
 def build_dataset() -> Dataset:
-    indices = list(range(min(train_size(), int(os.getenv("MAX_TASKS", "1000000")))))
+    steps = train_route_steps()
+    indices = [index for index, value in enumerate(steps) if value <= MAX_ROUTE_STEPS]
+    indices = indices[: int(os.getenv("MAX_TASKS", "1000000"))]
     random.Random(SEED).shuffle(indices)
     return Dataset.from_list(
         [

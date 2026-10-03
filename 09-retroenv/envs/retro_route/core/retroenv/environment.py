@@ -172,6 +172,7 @@ class RetroRouteSession:
         try:
             return self.precedent_index.search(
                 task_id=task.task_id,
+                task=task,
                 product_smiles=product_smiles or None,
                 reaction_class=reaction_class or None,
                 limit=min(limit, self.max_search_results),
@@ -288,6 +289,7 @@ class RetroRouteSession:
                 }
         result = self.precedent_index.search(
             task_id=task.task_id,
+            task=task,
             product_smiles=product_smiles or None,
             reaction_class=reaction_class or None,
             limit=min(limit, self.max_search_results),
@@ -311,6 +313,7 @@ class RetroRouteSession:
         task = self._require_task()
         result = self.precedent_index.search(
             task_id=task.task_id,
+            task=task,
             product_smiles=product_smiles or None,
             reaction_class=reaction_class or None,
             limit=min(limit, self.max_search_results),
