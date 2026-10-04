@@ -15,7 +15,6 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-
 HERE = Path(__file__).resolve().parent
 DEFAULT_MANIFEST = HERE / "sources.json"
 DEFAULT_OUTPUT = HERE.parent / "data" / "raw"
@@ -83,9 +82,7 @@ def _fetch_git(fetch: dict[str, Any], destination: Path) -> dict[str, Any]:
     )
     if shutil.which("git-lfs"):
         subprocess.run(["git", "-C", str(destination), "lfs", "pull"], check=True)
-    actual = subprocess.check_output(
-        ["git", "-C", str(destination), "rev-parse", "HEAD"], text=True
-    ).strip()
+    actual = subprocess.check_output(["git", "-C", str(destination), "rev-parse", "HEAD"], text=True).strip()
     if actual != revision:
         raise RuntimeError(f"git revision mismatch: expected {revision}, got {actual}")
     return {"revision": actual, "path": str(destination)}
@@ -105,9 +102,7 @@ def _fetch_figshare(fetch: dict[str, Any], destination: Path) -> dict[str, Any]:
             status = "already_present"
         else:
             temporary = target.with_suffix(target.suffix + ".part")
-            request = urllib.request.Request(
-                spec["download_url"], headers={"User-Agent": "RetroEnv/0.1"}
-            )
+            request = urllib.request.Request(spec["download_url"], headers={"User-Agent": "RetroEnv/0.1"})
             with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as handle:
                 shutil.copyfileobj(response, handle, length=1024 * 1024)
             if expected and _md5(temporary) != expected:
@@ -172,9 +167,7 @@ def _fetch_zenodo(fetch: dict[str, Any], destination: Path) -> dict[str, Any]:
         else:
             temporary = target.with_suffix(target.suffix + ".part")
             temporary.unlink(missing_ok=True)
-            request = urllib.request.Request(
-                spec["links"]["self"], headers={"User-Agent": "RetroEnv/0.1"}
-            )
+            request = urllib.request.Request(spec["links"]["self"], headers={"User-Agent": "RetroEnv/0.1"})
             with urllib.request.urlopen(request, timeout=120) as response, temporary.open("wb") as handle:
                 shutil.copyfileobj(response, handle, length=1024 * 1024)
             if expected and _md5(temporary) != expected:

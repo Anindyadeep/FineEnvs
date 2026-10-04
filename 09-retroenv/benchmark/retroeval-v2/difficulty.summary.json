@@ -1,0 +1,72 @@
+{
+  "tiers_by_split": {
+    "train": {
+      "medium": 190,
+      "easy": 344,
+      "hard": 66
+    },
+    "dev": {
+      "easy": 55,
+      "medium": 24,
+      "hard": 21
+    },
+    "eval": {
+      "hard": 23,
+      "easy": 83,
+      "medium": 44
+    },
+    "stress": {
+      "easy": 89,
+      "hard": 27,
+      "medium": 34
+    }
+  },
+  "first_step_families": [
+    [
+      "alkylation / SNAr",
+      332
+    ],
+    [
+      "one-reactant FGI",
+      244
+    ],
+    [
+      "other",
+      160
+    ],
+    [
+      "amide/ester coupling",
+      125
+    ],
+    [
+      "reductive amination",
+      63
+    ],
+    [
+      "Suzuki-type coupling",
+      46
+    ],
+    [
+      "sulfonylation",
+      29
+    ],
+    [
+      "Boc deprotection",
+      20
+    ],
+    [
+      "urea / carbamate",
+      13
+    ],
+    [
+      "Boc protection",
+      8
+    ]
+  ],
+  "points_rate": {
+    "three_steps": 0.454,
+    "no_close_train_target": 0.499,
+    "uncommon_first_step": 0.224,
+    "rare_leaf": 0.188
+  }
+}

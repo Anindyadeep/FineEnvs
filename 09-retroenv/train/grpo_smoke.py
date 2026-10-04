@@ -4,6 +4,9 @@
 Run this from the project checkout in a TRL image/environment. It is deliberately
 small: prove the base model can use the graph tools and overfit a few indexed
 tasks before creating a large job.
+
+Set RETROENV_SERVER to train against a running OpenEnv server (local or a
+Space), the same one eval/run_eval.py uses; otherwise the session runs in-process.
 """
 
 from __future__ import annotations
@@ -14,33 +17,44 @@ from pathlib import Path
 
 from datasets import Dataset
 from peft import LoraConfig
-from trl import GRPOConfig, GRPOTrainer
-
 from retroenv.store import TaskStore
 from retroenv.training import RetroRouteTrainingEnv
-
+from retroenv_openenv.client import RemoteRetroRouteEnv, RetroEnvClient
+from trl import GRPOConfig, GRPOTrainer
 
 MODEL = os.getenv("MODEL", "Qwen/Qwen3.5-4B")
 OUTPUT_DIR = os.getenv("OUTPUT_DIR", "outputs/retroenv-grpo-smoke")
 NUM_GENERATIONS = int(os.getenv("NUM_GENERATIONS", "4"))
 MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))
 SEED = int(os.getenv("SEED", "17"))
+SERVER = os.getenv("RETROENV_SERVER")
+# Curriculum: train only on tasks whose route needs at most this many steps
+# (v3 has 2- to 5-step tasks); raise it once the shorter ones are solved.
+MAX_ROUTE_STEPS = int(os.getenv("MAX_ROUTE_STEPS", "99"))
 
 
-def build_dataset() -> Dataset:
+def train_route_steps() -> list[int]:
+    """Each train task's step budget, in index order (a public field)."""
+    if SERVER:
+        with RetroEnvClient(SERVER) as client:
+            return [int(task["max_steps"]) for task in client.tasks("train")]
     root = Path(__file__).resolve().parents[1]
     store = TaskStore(
         os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"),
         os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"),
     )
-    indices = list(range(len(store.tasks("train"))))
+    return [task.max_steps for task in store.tasks("train")]
+
+
+def build_dataset() -> Dataset:
+    steps = train_route_steps()
+    indices = [index for index, value in enumerate(steps) if value <= MAX_ROUTE_STEPS]
+    indices = indices[: int(os.getenv("MAX_TASKS", "1000000"))]
     random.Random(SEED).shuffle(indices)
     return Dataset.from_list(
         [
             {
-                "prompt": [
-                    {"role": "user", "content": [{"type": "text", "text": ""}]}
-                ],
+                "prompt": [{"role": "user", "content": [{"type": "text", "text": ""}]}],
                 "split": "train",
                 "index": index,
             }
@@ -54,7 +68,7 @@ def main() -> None:
     trainer = GRPOTrainer(
         model=MODEL,
         train_dataset=build_dataset(),
-        environment_factory=RetroRouteTrainingEnv,
+        environment_factory=RemoteRetroRouteEnv if SERVER else RetroRouteTrainingEnv,
         peft_config=LoraConfig(
             r=16,
             lora_alpha=32,

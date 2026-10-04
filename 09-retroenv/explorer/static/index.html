@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>RetroEnv Explorer</title>
+    <link rel="stylesheet" href="/static/app.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="wrap top-inner">
+        <a class="brand" href="#/">RetroEnv <span>explorer</span></a>
+        <nav class="nav">
+          <a href="#/" data-nav="overview">Environment</a>
+          <a href="#/tasks" data-nav="tasks">RL tasks</a>
+          <a href="#/sft" data-nav="sft">SFT data</a>
+          <a href="#/runs" data-nav="runs">Model runs</a>
+        </nav>
+        <div class="top-right">
+          <label class="sel" for="benchmark"
+            >Benchmark
+            <select id="benchmark"></select
+          ></label>
+          <label class="sel" for="dataset"
+            >SFT dataset
+            <select id="dataset"></select
+          ></label>
+        </div>
+      </div>
+    </header>
+    <main class="wrap page" id="view">
+      <div class="loading-row"><span class="spinner"></span>Loading</div>
+    </main>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

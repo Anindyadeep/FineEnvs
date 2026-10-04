@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 
+from conftest import make_task
 from retroenv.graph import routes_to_submission
 from retroenv.training import RetroRouteTrainingEnv
-
-from conftest import make_task
 
 
 def test_training_factory_adapter_uses_same_terminal_score(tmp_path):

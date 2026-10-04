@@ -1,0 +1,152 @@
+{
+  "empty_graph_floor": {
+    "attempts": 1000,
+    "average_successful_steps": 0.0,
+    "average_tool_calls_per_success": 0.0,
+    "by_split": {
+      "dev": {
+        "pass@1": 0.0,
+        "tasks": 100
+      },
+      "eval": {
+        "pass@1": 0.0,
+        "tasks": 150
+      },
+      "stress": {
+        "pass@1": 0.0,
+        "tasks": 150
+      },
+      "train": {
+        "pass@1": 0.0,
+        "tasks": 600
+      }
+    },
+    "invalid_proposal_rate": 0.0,
+    "pass@1": 0.0,
+    "pass_ci95": {
+      "pass@1": [
+        0.0,
+        0.003827
+      ]
+    },
+    "schema_version": "retro-eval-v1",
+    "successful_attempts": 0,
+    "tasks": 1000,
+    "tasks_with_predictions": 1000,
+    "top1_building_block_completion": 0.0,
+    "top1_exact_reference_match": 0.0,
+    "top1_graph_validity": 0.0,
+    "top1_molecule_validity": 0.0,
+    "top1_parse_validity": 1.0,
+    "top1_reference_similarity": 0.0,
+    "top1_reward": 0.05,
+    "top1_route_validity": 0.0,
+    "top1_step_validity": 0.0,
+    "top1_verified_route_diversity": 0.0,
+    "verification_tiers": {
+      "dataset_supported": 0,
+      "rejected": 1000,
+      "template_supported": 0
+    }
+  },
+  "one_route_ablation": {
+    "attempts": 1000,
+    "average_successful_steps": 0.0,
+    "average_tool_calls_per_success": 0.0,
+    "by_split": {
+      "dev": {
+        "pass@1": 0.78,
+        "tasks": 100
+      },
+      "eval": {
+        "pass@1": 0.88,
+        "tasks": 150
+      },
+      "stress": {
+        "pass@1": 0.866667,
+        "tasks": 150
+      },
+      "train": {
+        "pass@1": 0.916667,
+        "tasks": 600
+      }
+    },
+    "invalid_proposal_rate": 0.0,
+    "pass@1": 0.89,
+    "pass_ci95": {
+      "pass@1": [
+        0.869095,
+        0.907921
+      ]
+    },
+    "schema_version": "retro-eval-v1",
+    "successful_attempts": 890,
+    "tasks": 1000,
+    "tasks_with_predictions": 1000,
+    "top1_building_block_completion": 1.0,
+    "top1_exact_reference_match": 1.0,
+    "top1_graph_validity": 0.98625,
+    "top1_molecule_validity": 1.0,
+    "top1_parse_validity": 1.0,
+    "top1_reference_similarity": 1.0,
+    "top1_reward": 0.976625,
+    "top1_route_validity": 0.89,
+    "top1_step_validity": 1.0,
+    "top1_verified_route_diversity": 0.945,
+    "verification_tiers": {
+      "dataset_supported": 1000,
+      "rejected": 0,
+      "template_supported": 0
+    }
+  },
+  "oracle_ceiling": {
+    "attempts": 1000,
+    "average_successful_steps": 0.0,
+    "average_tool_calls_per_success": 0.0,
+    "by_split": {
+      "dev": {
+        "pass@1": 1.0,
+        "tasks": 100
+      },
+      "eval": {
+        "pass@1": 1.0,
+        "tasks": 150
+      },
+      "stress": {
+        "pass@1": 1.0,
+        "tasks": 150
+      },
+      "train": {
+        "pass@1": 1.0,
+        "tasks": 600
+      }
+    },
+    "invalid_proposal_rate": 0.0,
+    "pass@1": 1.0,
+    "pass_ci95": {
+      "pass@1": [
+        0.996173,
+        1.0
+      ]
+    },
+    "schema_version": "retro-eval-v1",
+    "successful_attempts": 1000,
+    "tasks": 1000,
+    "tasks_with_predictions": 1000,
+    "top1_building_block_completion": 1.0,
+    "top1_exact_reference_match": 1.0,
+    "top1_graph_validity": 1.0,
+    "top1_molecule_validity": 1.0,
+    "top1_parse_validity": 1.0,
+    "top1_reference_similarity": 1.0,
+    "top1_reward": 1.0,
+    "top1_route_validity": 1.0,
+    "top1_step_validity": 1.0,
+    "top1_verified_route_diversity": 1.0,
+    "verification_tiers": {
+      "dataset_supported": 1000,
+      "rejected": 0,
+      "template_supported": 0
+    }
+  }
+}

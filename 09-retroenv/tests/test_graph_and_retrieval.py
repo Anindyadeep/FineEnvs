@@ -2,22 +2,18 @@ from __future__ import annotations
 
 import copy
 
+from conftest import make_task
 from retroenv.graph import parse_submission, routes_to_submission
 from retroenv.models import ReferenceRoute, RetroTask
 from retroenv.retrieval import PrecedentIndex, StockIndex, molecule_lookup
 from retroenv.verifier import RouteVerifier
-
-from conftest import make_task
-
 
 STOCK = {"CCO", "CC(=O)O"}
 
 
 def test_reference_round_trip_is_renderable_and_scores_one():
     task = make_task()
-    submission = routes_to_submission(
-        task.target_smiles, task.reference_routes, STOCK, source="oracle-smoke-test"
-    )
+    submission = routes_to_submission(task.target_smiles, task.reference_routes, STOCK, source="oracle-smoke-test")
     parsed = parse_submission(submission)
     assert parsed.parse_valid is True
     assert parsed.trees[0].graph_valid is True
@@ -122,9 +118,7 @@ def test_stock_retrieval_is_exact_and_capped():
 def test_precedent_index_excludes_current_task():
     task = make_task()
     index = PrecedentIndex((task,))
-    assert index.search(task_id=task.task_id, product_smiles=task.target_smiles)[
-        "results"
-    ] == []
+    assert index.search(task_id=task.task_id, product_smiles=task.target_smiles)["results"] == []
 
 
 def test_pubchem_name_lookup_uses_frozen_cache():
@@ -135,3 +129,52 @@ def test_pubchem_name_lookup_uses_frozen_cache():
     assert result["canonical_smiles"] == "CCO"
     assert result["cid"] == 702
     assert result["source"] == "frozen_pubchem_cache"
+
+
+def _step_task(task_id: str, target: str, reactants: tuple[str, ...], patent: str) -> RetroTask:
+    from retroenv.chemistry import canonicalize_smiles
+    from retroenv.models import ReactionStep
+
+    target = canonicalize_smiles(target)
+    step = ReactionStep(
+        product=target, reactants=tuple(canonicalize_smiles(r) for r in reactants), reaction_id=f"rxn_{task_id}"
+    )
+    route = ReferenceRoute(
+        route_id=f"route_{task_id}", steps=(step,), source=({"name": "fixture", "group_id": patent, "license": "CC0"},)
+    )
+    return RetroTask(
+        task_id=task_id,
+        mode="route_planning",
+        target_smiles=target,
+        max_steps=1,
+        stock_id="s",
+        split="train",
+        reference_routes=(route,),
+    )
+
+
+def test_precedents_hide_from_a_train_task_what_the_split_hides_from_eval():
+    aspirin = _step_task("retro_a", "CC(=O)Oc1ccccc1C(=O)O", ("CC(=O)Cl", "O=C(O)c1ccccc1O"), "US1")
+    sibling = _step_task("retro_b", "CCC(=O)Oc1ccccc1C(=O)O", ("CCC(=O)Cl", "O=C(O)c1ccccc1O"), "US1")
+    unrelated = _step_task("retro_c", "CC(=O)Nc1ccc2ccccc2c1", ("CC(=O)Cl", "Nc1ccc2ccccc2c1"), "US2")
+    index = PrecedentIndex((aspirin, sibling, unrelated), exact_single_ring_scaffolds=True)
+
+    def products(task):
+        found = index.search(task_id=task.task_id, product_smiles=task.target_smiles, task=task)
+        return {row["product_smiles"] for row in found["results"]}
+
+    # Same patent: the sibling is what an eval task could never see, so the train task cannot either.
+    assert products(aspirin) == {unrelated.target_smiles}
+    assert index.hidden(aspirin) == {0, 1}
+    # Without the task, the old behaviour: only the task's own record is skipped.
+    assert len(index.search(task_id=aspirin.task_id, product_smiles=aspirin.target_smiles)["results"]) == 2
+    held_out = _step_task("retro_eval", "O=C(Nc1ccccn1)c1cccs1", ("O=C(Cl)c1cccs1", "Nc1ccccn1"), "US9")
+    assert index.hidden(held_out) == frozenset()
+
+
+def test_a_generic_scaffold_groups_by_exact_structure():
+    from retroenv.chemistry import scaffold_group_key
+
+    biphenyl = "c1ccc(-c2ccccc2)cc1"
+    assert scaffold_group_key("Cc1ccc(-c2ccccc2)cc1") == biphenyl
+    assert scaffold_group_key("Cc1ccc(-c2ccccc2)cc1", generic=frozenset({biphenyl})).startswith("exact:")

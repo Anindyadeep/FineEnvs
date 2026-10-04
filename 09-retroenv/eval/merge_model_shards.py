@@ -71,9 +71,7 @@ def main() -> int:
     missing = sorted(expected_set - set(predictions))
     extra = sorted(set(predictions) - expected_set)
     if missing or extra:
-        raise ValueError(
-            f"shards do not exactly cover {args.split}: missing={missing[:3]}, extra={extra[:3]}"
-        )
+        raise ValueError(f"shards do not exactly cover {args.split}: missing={missing[:3]}, extra={extra[:3]}")
     prediction_rows = [predictions[task_id] for task_id in expected_ids]
     episode_rows = sorted(
         episodes.values(),

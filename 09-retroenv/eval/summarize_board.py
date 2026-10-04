@@ -47,14 +47,8 @@ def main() -> int:
         predicted = int(report["tasks_with_predictions"])
         if predicted != expected_tasks:
             failures.append(f"{stem}: only {predicted}/{expected_tasks} tasks predicted")
-        usage_cost = sum(
-            float((row.get("usage") or {}).get("reported_cost_usd") or 0.0)
-            for row in episodes
-        )
-        latency = sum(
-            float((row.get("usage") or {}).get("latency_seconds") or 0.0)
-            for row in episodes
-        )
+        usage_cost = sum(float((row.get("usage") or {}).get("reported_cost_usd") or 0.0) for row in episodes)
+        latency = sum(float((row.get("usage") or {}).get("latency_seconds") or 0.0) for row in episodes)
         model = run["requested_model"]
         if model in seen_models:
             failures.append(f"duplicate completed run for model: {model}")
@@ -81,9 +75,7 @@ def main() -> int:
         )
     if len(task_sequences) > 1:
         failures.append("run manifests use different task sequences")
-    missing_models = [
-        row["id"] for row in config["models"] if row["id"] not in seen_models
-    ]
+    missing_models = [row["id"] for row in config["models"] if row["id"] not in seen_models]
     if missing_models:
         failures.append("missing configured model runs: " + ", ".join(missing_models))
     rows.sort(key=lambda row: (-row["pass@1"], -row["mean_reward"], row["label"]))

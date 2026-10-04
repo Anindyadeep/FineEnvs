@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import json
 import importlib.util
+import json
 from pathlib import Path
 from types import SimpleNamespace
-
 
 _SPEC = importlib.util.spec_from_file_location(
     "retroenv_eval_run_model", Path(__file__).parents[1] / "eval" / "run_model.py"
@@ -86,12 +85,9 @@ def test_rollout_recovers_from_empty_turn_and_forces_final_emit():
     )
 
     assert len(completions.requests) == 2
-    assert [tool["function"]["name"] for tool in completions.requests[1]["tools"]] == [
-        "emit_routes"
-    ]
+    assert [tool["function"]["name"] for tool in completions.requests[1]["tools"]] == ["emit_routes"]
     assert any(
-        item.get("role") == "user" and "No tool call" in item.get("content", "")
-        for item in result["transcript"]
+        item.get("role") == "user" and "No tool call" in item.get("content", "") for item in result["transcript"]
     )
     assert result["submission"] == {"routes": []}
     assert result["resolved_models"] == ["mock/model"]
@@ -111,8 +107,6 @@ def test_rollout_bounds_empty_turn_recovery():
     )
 
     assert len(completions.requests) == 3
-    assert [tool["function"]["name"] for tool in completions.requests[-1]["tools"]] == [
-        "emit_routes"
-    ]
+    assert [tool["function"]["name"] for tool in completions.requests[-1]["tools"]] == ["emit_routes"]
     assert result["submission"] == {"routes": []}
     assert len(result["errors"]) == 3

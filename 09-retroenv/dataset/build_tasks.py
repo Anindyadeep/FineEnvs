@@ -3,7 +3,5 @@
 
 from retroenv.taskgen import main
 
-
 if __name__ == "__main__":
     raise SystemExit(main())
-

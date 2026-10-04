@@ -14,3 +14,6 @@ __pycache__/
 *.gz
 *.parquet
 *.ckpt
+
+# Model evaluation runs: transcripts include solved routes, so only summaries are committed.
+runs/
