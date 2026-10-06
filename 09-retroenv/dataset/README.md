@@ -48,37 +48,21 @@ The official ORD repository documents that Parquet rows contain serialized
 protobuf reaction messages and gives conversion examples:
 <https://github.com/open-reaction-database/ord-data#data-manipulation>.
 
-Typical pipeline:
+## Release build
 
-```text
-raw immutable artifact + license manifest
-  -> source-specific role extraction
-  -> retroenv-build-corpus
-  -> normalized/deduplicated corpus + rejects + report
-  -> retroenv-build-tasks
-  -> server-private tasks + split manifest + stock snapshot
-  -> export_public.py
-  -> reference-free public prompts
-```
+`build_release.py` turns the PaRoutes v2 archive into the RL release (tasks, stock,
+reaction library) in `data/release/RetroEnv-RL`, and `audit_release.py` checks it with the
+runtime code. The stages live in `pipeline/`: flatten, annotate (class, rdchiral template,
+atom-map flags), solve the reaction graph against the stock, choose targets, split by
+blocklist, generate constraint variants with witnesses, and write the release.
 
-Do not infer multi-step routes by globally joining products and reactants.
-Route planning records must preserve route-level provenance.
+Leakage contract: held-out tasks share no patent, route molecule (target or
+intermediate), reaction, scaffold group or Tanimoto >= 0.90 near-duplicate with train or
+with each other, including the molecules and reactions of variant witness routes. Library
+reactions touching a held-out key are marked invisible and never reach the agent's tools.
 
-## Leakage contract
+Witness routes join corpus reactions from different patents through shared
+intermediates. Each step is a recorded reaction, so the chemistry-first verifier accepts
+them, but the route as a whole was never run; they only prove a task is solvable and add
+a similarity bonus, while patent routes keep their own provenance.
 
-The task builder unions tasks sharing any exact target, Murcko scaffold, route
-ID, reaction ID, source/patent group, or Morgan-fingerprint near-duplicate. A
-whole connected component is assigned to one split, and output is rejected if
-the post-split audit sees any group crossing a boundary. Because exhaustive
-fingerprint comparison is quadratic, the built-in exact comparison refuses
-corpora above 25,000 tasks. Large releases must pre-cluster targets and feed the
-cluster identifier as a source group; disabling the comparison without an
-external audit is not a release-quality configuration.
-
-## SFT export
-
-`build_sft.py` turns `eval/run_eval.py` train-split runs (the scripted reference
-expert or a teacher model) into chat-format SFT rows. Only passed episodes are
-kept. A run or task from dev, eval or stress is an error, and the train tasks
-used are re-audited against the held-out splits before anything is written.
-`train/README.md` gives the full recipe.
