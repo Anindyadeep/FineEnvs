@@ -146,7 +146,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
     return {
         "reward": final.get("reward", 0.0),
         "valid": bool(final.get("valid", False)),
-        "exact_match": bool((final.get("metrics") or {}).get("exact_reference_match", False)),
+        "exact_match": bool((final.get("metrics") or {}).get("reference_match", False)),
         "components": final.get("components", {}),
         "hard_failures": final.get("hard_failures", []),
         "verification_tier": final.get("verification_tier"),

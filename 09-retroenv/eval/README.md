@@ -7,34 +7,34 @@ uv sync --extra dev --extra eval
 
 # Claude, on the Messages API
 uv run python eval/run_eval.py --provider anthropic --model claude-opus-5-5 \
-  --split eval --output runs/v3-eval/claude-opus-5-5
+  --split test_id --output runs/test_id/claude-opus-5-5
 
 # GPT-5.6, on the Responses API (chat completions rejects tools with reasoning)
-uv run python eval/run_eval.py --provider openai --model gpt-5.6-sol --output runs/v3-eval/gpt-5.6-sol
+uv run python eval/run_eval.py --provider openai --model gpt-5.6-sol --split test_id --output runs/test_id/gpt-5.6-sol
 
 # Open models on the HF router; pin a provider so prices are stable
 uv run python eval/run_eval.py --provider hf --model "deepseek-ai/DeepSeek-V4.1-Flash:novita" \
-  --output runs/v3-eval/deepseek-v4.1-flash
+  --split test_id --output runs/test_id/deepseek-v4.1-flash
 
 # A local vLLM server or any OpenAI-compatible endpoint
 uv run python eval/run_eval.py --provider custom --endpoint http://127.0.0.1:8001/v1 \
-  --model Qwen/Qwen3.5-4B --api-key-env VLLM_KEY --output runs/v3-eval/qwen3.5-4b
+  --model Qwen/Qwen3.5-4B --api-key-env VLLM_KEY --split test_id --output runs/test_id/qwen3.5-4b
 
 # No model: a scripted chemist replays the private reference routes (SFT data; see train/README.md)
-uv run python eval/run_eval.py --provider reference --split train --attempts 2 --output runs/sft/chemist-v3
+uv run python eval/run_eval.py --provider reference --split train --attempts 2 --output runs/sft/chemist
 
 # Build the table from finished runs
-uv run python eval/summarize.py runs/v3-eval/* --output benchmark/retroeval-v3/results
+uv run python eval/summarize.py runs/test_id/* --output runs/test_id/results
 ```
 
-On v2, the six-model board cost $62.5 for 150 eval tasks. v3's 250 eval tasks include 4- and 5-step routes, so expect about twice that.
+Each held-out split has 1,000 targets plus variants; run a dev slice first to estimate cost.
 
 | Option | Default | Notes |
 |---|---|---|
 | `--split`, `--start`, `--tasks` | `eval`, 0, all | A stable slice of the split |
 | `--attempts` | 1 | Above 1, the summary adds unbiased pass@k |
 | `--max-turns` | 16 | The last turn exposes only `emit_routes` |
-| `--toolset` | `full` | `unaided` starts the local server without the reference-backed tools |
+| `--toolset` | `full` | `unaided` starts the local server without `validate_disconnection` (an ablation) |
 | `--concurrency` | 8 | One WebSocket session per episode |
 | `--max-cost` | none | Stops scheduling episodes once spend reaches this many USD |
 | `--tool-choice` | `required` | Some HF providers only accept `auto` (novita, and cerebras for Qwen3.8) |
@@ -73,7 +73,6 @@ These scripts reproduce the v1 board (20 tasks, run in-process over OpenRouter) 
 
 `retroenv-eval` recomputes every reward from the private tasks and the pinned stock, and never trusts a submitted reward. A missing task fails Pass@k instead of leaving the denominator; duplicate rows and unknown task IDs are errors.
 
-* `run_baselines.py`: the oracle ceiling, one-route ablation and empty-graph floor.
 * `run_model.py`: drives an OpenAI-compatible endpoint on the in-process session. It checkpoints each attempt, supports `--resume` and a provider-reported cost cap, and restricts the last turn to `emit_routes`.
 * `estimate_board_cost.py`: projects cost from measured episode tokens. `benchmark_models.json` holds the model IDs and the dated price snapshot.
 * `merge_model_shards.py`: merges `--start-index`/`--limit` shards and rejects duplicate, missing or mismatched ones.

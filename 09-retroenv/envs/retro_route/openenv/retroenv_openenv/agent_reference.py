@@ -34,6 +34,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+from retroenv.benchmark import load_benchmark
 from retroenv.chemistry import canonicalize_smiles
 from retroenv.disconnections import (
     UNCERTAIN,
@@ -45,8 +46,8 @@ from retroenv.disconnections import (
     strategic_disconnections,
 )
 from retroenv.models import RetroTask
-from retroenv.store import TaskStore
-from retroenv.verifier import RouteVerifier
+from retroenv.reactions import ReactionLibrary
+from retroenv.verifier import compliant_references
 
 from . import agent
 from .client import RetroEnvClient
@@ -78,12 +79,15 @@ class _ToolCall:
         }
 
 
-def _routes(task: RetroTask) -> list[dict[str, tuple[str, ...]]]:
-    """One product -> reactants map per submitted route, one route per distinct first cut."""
+def _routes(task: RetroTask, stock: frozenset[str]) -> list[dict[str, tuple[str, ...]]]:
+    """One product -> reactants map per submitted route, one route per distinct first cut.
+
+    Only known routes that satisfy the task's depth, stock and class constraints are replayed."""
     target = canonicalize_smiles(task.target_smiles)
     routes: list[dict[str, tuple[str, ...]]] = []
     first_cuts: set[tuple[str, ...]] = set()
-    for route in task.reference_routes:
+    available = stock - frozenset(canonicalize_smiles(s) for s in task.constraints.excluded_stock)
+    for route in compliant_references(task, available, frozenset(task.constraints.forbidden_classes)):
         steps = {canonicalize_smiles(step.product): tuple(step.reactants) for step in route.steps}
         first = tuple(sorted(steps.get(target, ())))
         if not first or first in first_cuts:
@@ -122,7 +126,7 @@ def _observe(messages: list[dict[str, Any]]) -> _Observed:
         if name == "stock_retrieve":
             seen.stock[canonicalize_smiles(arguments["query"])] = bool(result.get("results"))
         elif name == "validate_disconnection":
-            seen.validated[(arguments["product_smiles"], tuple(arguments["reactants"]))] = bool(result.get("valid"))
+            seen.validated[(arguments["product_smiles"], tuple(arguments["reactants"]))] = bool(result.get("supported"))
         elif name == "inspect_molecule":
             seen.inspect, seen.researched = result, True
         elif name == "reaction_precedent_search":
@@ -140,13 +144,20 @@ class ReferenceExpert:
     """
 
     def __init__(
-        self, task: RetroTask, seed: str | None = None, *, research: bool | None = None, alternatives: int | None = None
+        self,
+        task: RetroTask,
+        library: ReactionLibrary,
+        stock: frozenset[str],
+        seed: str | None = None,
+        *,
+        research: bool | None = None,
+        alternatives: int | None = None,
     ):
         self.task = task
         self.seed = seed or task.task_id
         self.target = canonicalize_smiles(task.target_smiles)
-        self.routes = _routes(task)
-        self.verifier = RouteVerifier()
+        self.routes = _routes(task, stock)
+        self.library = library
         self.research = self._u("research") < 0.75 if research is None else research
         self.inspect = self.research and self._u("inspect") < 0.6
         self.precedent = self.research and (not self.inspect or self._u("precedent") < 0.85)
@@ -185,8 +196,8 @@ class ReferenceExpert:
                 d
                 for d in strategic_disconnections(product)
                 if tuple(sorted(d.reactants)) not in references[product]
-                # A cut the hidden evidence supports would be accepted, so it is no alternative.
-                and not self.verifier.validate_step(self.task, product, list(d.reactants)).valid
+                # A cut the train-visible library supports would be accepted, so it is no alternative.
+                and not self.library.support(product, list(d.reactants)).supported
             ]
             if candidates[:count]:
                 plan[product] = candidates[:count]
@@ -286,7 +297,7 @@ class ReferenceExpert:
             if name == "stock_retrieve"
         ]
         missing = [smiles for smiles, found in lookups if not found]
-        if verdicts and not verdicts[0].get("valid"):
+        if verdicts and not verdicts[0].get("supported"):
             parts.append(
                 self._pick(
                     [
@@ -557,13 +568,14 @@ class ReferenceTasks:
     """Private tasks by ID, so ``run_episode`` can build each episode's expert."""
 
     def __init__(self, benchmark_dir: str | Path):
-        root = Path(benchmark_dir)
-        store = TaskStore(root / "tasks-private", root / "stocks")
-        self.tasks = {task.task_id: task for task in store.iter_all()}
+        self.benchmark = load_benchmark(str(Path(benchmark_dir).resolve()))
+        self.tasks = {task.task_id: task for task in self.benchmark.store.iter_all()}
 
     def expert(self, task_id: str, seed: str | None = None) -> ReferenceExpert:
         try:
-            return ReferenceExpert(self.tasks[task_id], seed)
+            task = self.tasks[task_id]
+            stock = self.benchmark.store.stock(task.stock_id)
+            return ReferenceExpert(task, self.benchmark.tool_library, stock, seed)
         except KeyError:
             raise KeyError(f"{task_id} is not in the private tasks given to the reference expert") from None
 

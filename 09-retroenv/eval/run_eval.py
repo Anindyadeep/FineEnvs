@@ -6,11 +6,10 @@ training. Without ``--server`` the script starts a local server on a free
 port for ``--benchmark-dir`` and stops it at the end.
 
     uv run --extra eval python eval/run_eval.py --provider anthropic \\
-        --model claude-opus-5-5 --split eval --output runs/v2-eval/opus-5-5
+        --model claude-opus-5-5 --split test_id --output runs/test_id/opus-5-5
 
 ``--provider reference`` runs no model: a scripted expert replays each task's
-private reference routes through the same loop and server. That is the SFT
-trajectory generator; see ``dataset/build_sft.py``.
+compliant known routes through the same loop and server (the SFT trajectory generator).
 
 Output directory:
     identity.json   model, sampling, tasks and code hashes; a rerun must match
@@ -120,7 +119,7 @@ def local_server(benchmark_dir: Path, toolset: str, concurrency: int, log_path: 
         )
         url = f"http://127.0.0.1:{port}"
         try:
-            deadline = time.monotonic() + 120
+            deadline = time.monotonic() + 600  # loading a full release takes a few minutes
             while True:
                 if process.poll() is not None:
                     raise RuntimeError(f"local server exited; see {log_path}")
@@ -227,8 +226,8 @@ def recompute(output: Path) -> int:
     summary["label"] = identity["label"]
     summary["model"] = identity["model"]
     summary["toolset"] = identity["toolset"]
-    summary["by_kind"] = breakdown(graded, "kind", attempts)
-    summary["by_depth"] = breakdown(graded, "depth", attempts)
+    summary["by_variant"] = breakdown(graded, "variant", attempts)
+    summary["by_max_depth"] = breakdown(graded, "max_depth", attempts)
     if any(row.get("tier") for row in graded):
         summary["by_tier"] = breakdown(graded, "tier", attempts)
     write_json(output / "summary.json", summary)
@@ -244,7 +243,7 @@ def main() -> int:
     parser.add_argument("--endpoint", help="OpenAI-compatible base URL (custom provider, or an override)")
     parser.add_argument("--api-key-env", help="environment variable holding the API key")
     parser.add_argument("--server", help="URL of a running RetroEnv server; default starts a local one")
-    parser.add_argument("--benchmark-dir", type=Path, default=ROOT / "benchmark" / "retroeval-v3")
+    parser.add_argument("--benchmark-dir", type=Path, default=ROOT / "data" / "release" / "RetroEnv-RL")
     parser.add_argument(
         "--toolset",
         choices=("full", "unaided"),
@@ -254,6 +253,7 @@ def main() -> int:
     parser.add_argument("--split", default="eval")
     parser.add_argument("--start", type=int, default=0)
     parser.add_argument("--tasks", type=int, help="number of tasks from --start (default: the whole split)")
+    parser.add_argument("--task-ids", type=Path, help="file with one task ID per line; overrides --start/--tasks")
     parser.add_argument("--attempts", type=int, default=1)
     parser.add_argument("--concurrency", type=int, default=8)
     parser.add_argument("--max-turns", type=int, default=16)
@@ -263,9 +263,6 @@ def main() -> int:
     parser.add_argument("--reasoning-effort", help="OpenAI-compatible reasoning_effort")
     parser.add_argument("--tool-choice", default="required", help="OpenAI-compatible tool_choice")
     parser.add_argument("--max-cost", type=float, help="stop scheduling episodes once this many USD are spent")
-    parser.add_argument(
-        "--difficulty", type=Path, help="private tier sidecar (default: <benchmark-dir>/difficulty.jsonl)"
-    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
         "--recompute",
@@ -350,10 +347,10 @@ def main() -> int:
             "reasoning_effort": args.reasoning_effort,
         }
 
-    difficulty_path = args.difficulty or args.benchmark_dir / "difficulty.jsonl"
+    private = args.benchmark_dir / "tasks-private" / f"{args.split}.jsonl"
     tiers = {}
-    if difficulty_path.exists():
-        tiers = {row["task_id"]: row["tier"] for row in map(json.loads, difficulty_path.open())}
+    if private.exists():
+        tiers = {row["task_id"]: row.get("difficulty", {}).get("tier") for row in map(json.loads, private.open())}
 
     output: Path = args.output
     with (
@@ -363,7 +360,15 @@ def main() -> int:
     ) as url:
         probe = RetroEnvClient(url)
         public = probe.tasks(args.split)
-        selected = public[args.start : args.start + args.tasks if args.tasks else None]
+        if args.task_ids:
+            wanted = [line.strip() for line in args.task_ids.read_text().splitlines() if line.strip()]
+            by_id = {task["task_id"]: task for task in public}
+            missing = [task_id for task_id in wanted if task_id not in by_id]
+            if missing:
+                parser.error(f"{len(missing)} task IDs are not in split {args.split!r}, e.g. {missing[0]}")
+            selected = [by_id[task_id] for task_id in wanted]
+        else:
+            selected = public[args.start : args.start + args.tasks if args.tasks else None]
         if not selected:
             parser.error("the selected task range is empty")
         opening = probe.reset(args.split, index=selected[0]["index"])
@@ -445,8 +450,8 @@ def main() -> int:
                 "attempt": attempt,
                 "split": args.split,
                 "model": args.model,
-                "kind": "two_route" if task["min_routes"] >= 2 else "single_route",
-                "depth": task["max_steps"],
+                "variant": task["variant"],
+                "max_depth": task["max_depth"],
                 "tier": tiers.get(task["task_id"]),
                 "target_smiles": task["target_smiles"],
                 # The OpenAI-format transcript starts after the opening prompt; SFT export needs it.
@@ -487,8 +492,8 @@ def main() -> int:
     summary["label"] = identity["label"]
     summary["model"] = args.model
     summary["toolset"] = identity["toolset"]
-    summary["by_kind"] = breakdown([r for r in final_rows if r.get("graded")], "kind", args.attempts)
-    summary["by_depth"] = breakdown([r for r in final_rows if r.get("graded")], "depth", args.attempts)
+    summary["by_variant"] = breakdown([r for r in final_rows if r.get("graded")], "variant", args.attempts)
+    summary["by_max_depth"] = breakdown([r for r in final_rows if r.get("graded")], "max_depth", args.attempts)
     if tiers:
         summary["by_tier"] = breakdown([r for r in final_rows if r.get("graded")], "tier", args.attempts)
     write_json(output / "summary.json", summary)

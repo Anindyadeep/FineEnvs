@@ -9,7 +9,7 @@ from openenv_helpers import server_url  # noqa: F401  (fixture)
 from retroenv_openenv import agent
 from retroenv_openenv.agent import normalize_arguments
 from retroenv_openenv.client import RetroEnvClient
-from test_server import STORE, _oracle
+from test_server import SPLIT, STANDARD, STORE, _oracle
 
 
 class ScriptedLLM:
@@ -44,22 +44,43 @@ class ScriptedLLM:
 
 def test_normalize_arguments_repairs_only_a_stringified_submission():
     good = {"routes": []}
+    leaf = {"type": "mol", "smiles": "CCO", "in_stock": True, "children": []}
     assert normalize_arguments("emit_routes", {"submission": json.dumps(good) + "}"}) == ({"submission": good}, True)
+    broken = json.dumps({"routes": [leaf]})[:-2] + "]]}"
+    assert normalize_arguments("emit_routes", {"submission": broken}) == ({"submission": {"routes": [leaf]}}, True)
     assert normalize_arguments("emit_routes", {"submission": good}) == ({"submission": good}, False)
-    assert normalize_arguments("emit_routes", {"submission": '{"routes": [] trailing'})[1] is False
+    assert normalize_arguments("emit_routes", {"submission": "no routes here"})[1] is False
     assert normalize_arguments("stock_retrieve", {"query": "{}"})[1] is False
 
 
+def test_thinking_is_recorded_beside_the_turn_but_not_sent_back():
+    entry = {"role": "assistant", "content": "ok"}
+    assert agent.recorded(entry, SimpleNamespace(reasoning="because")) == {**entry, "reasoning": "because"}
+    assert agent.recorded(entry, SimpleNamespace(reasoning_content="vllm style"))["reasoning"] == "vllm style"
+    assert agent.recorded(entry, SimpleNamespace(reasoning=None)) is entry
+    assert agent.recorded(entry, SimpleNamespace()) is entry
+    assert "reasoning" not in entry
+
+
+def test_rate_limits_sent_as_bad_requests_are_retried():
+    class BadRequestError(Exception):
+        def __init__(self, code):
+            self.code = code
+
+    assert agent._is_transient(BadRequestError("-20048"))
+    assert not agent._is_transient(BadRequestError("invalid_value"))
+
+
 def test_episode_scores_through_the_server(server_url):
-    target = STORE.task("eval", 7).target_smiles
+    target = STORE.task(SPLIT, STANDARD[1]).target_smiles
     llm = ScriptedLLM(
         [
             ("stock_retrieve", json.dumps({"query": target, "mode": "exact"})),
-            ("emit_routes", json.dumps({"submission": json.dumps(_oracle("eval", 7)) + "}"})),
+            ("emit_routes", json.dumps({"submission": json.dumps(_oracle(SPLIT, STANDARD[1])) + "}"})),
         ]
     )
     with RetroEnvClient(server_url) as env:
-        opening = env.reset("eval", index=7)
+        opening = env.reset(SPLIT, index=STANDARD[1])
         result = agent.run_episode(llm, env, opening, agent.AgentConfig(model="scripted", max_turns=4))
     assert result["reward"] == 1.0 and result["valid"] and result["submission_coerced"]
     assert result["tool_calls"] == 2 and not result["auto_emitted"]
@@ -68,7 +89,7 @@ def test_episode_scores_through_the_server(server_url):
 def test_final_turn_exposes_only_emit_and_unsubmitted_episodes_score_the_floor(server_url):
     llm = ScriptedLLM([("inspect_molecule", json.dumps({"smiles": "CCO"}))] * 3)
     with RetroEnvClient(server_url) as env:
-        opening = env.reset("eval", index=8)
+        opening = env.reset(SPLIT, index=STANDARD[2])
         result = agent.run_episode(llm, env, opening, agent.AgentConfig(model="scripted", max_turns=3))
     assert llm.exposed[-1] == ["emit_routes"]
     assert result["auto_emitted"] and result["reward"] < 0.1 and not result["valid"]
@@ -79,8 +100,8 @@ def test_close_episode_keeps_a_score_the_server_already_recorded(server_url):
     from retroenv_openenv.agent import close_episode
 
     with RetroEnvClient(server_url) as env:
-        env.reset("eval", index=9)
-        scored = env.call("emit_routes", {"submission": _oracle("eval", 9)})
+        env.reset(SPLIT, index=STANDARD[3])
+        scored = env.call("emit_routes", {"submission": _oracle(SPLIT, STANDARD[3])})
         assert scored.reward == 1.0
         # The loop missed that reward (its call raised), so it closes the episode.
         final, submission = close_episode(env)
@@ -93,7 +114,7 @@ def test_close_episode_scores_the_floor_when_nothing_was_submitted(server_url):
     from retroenv_openenv.agent import close_episode
 
     with RetroEnvClient(server_url) as env:
-        env.reset("eval", index=9)
+        env.reset(SPLIT, index=STANDARD[3])
         final, submission = close_episode(env)
     assert final["reward"] < 0.1 and submission == {"routes": []}
     assert "recovered_after_transport_error" not in final

@@ -29,17 +29,17 @@ The same server is used for training, evaluation and the browser playground at `
 
 | Step | What happens |
 |---|---|
-| `reset(split, index)` | Returns the prompt, target, step cap, route count and tool names. It never returns references, patents or the stock list. |
+| `reset(split, index)` | Returns the prompt, target, depth budget, route count, constraints and tool names. It never returns known routes, patents or the stock list. |
 | tool calls | MCP `call_tool`. Up to 32 calls per episode (`RETROENV_MAX_TOOL_CALLS`); `emit_routes` always stays available. |
 | `emit_routes(submission)` | Scores the trees. That step returns `done=True` with the dense reward, once. |
 
 | Tool | Answers from |
 |---|---|
 | `inspect_molecule`, `pubchem_lookup` | RDKit on the given SMILES |
-| `stock_retrieve` | The stock: exact, InChIKey, class, SMARTS or similarity search, capped at 20 results |
-| `reaction_precedent_search`, `search_literature` | Training-split reactions only |
-| `validate_disconnection`, `reaction_class_lookup` | **This task's hidden references.** Removed by `RETROENV_TOOLSET=unaided`. |
-| `reaction_conditions_search` | The hidden record for a matching cut (full toolset), otherwise training analogues |
+| `stock_retrieve` | The task's stock (excluded building blocks absent): exact, InChIKey, class, SMARTS or similarity search, capped at 20 results |
+| `reaction_precedent_search`, `search_literature`, `reaction_conditions_search` | Train-visible corpus reactions only |
+| `validate_disconnection` | Train-visible reactions and frequent templates, never this task's hidden routes. Removed by `RETROENV_TOOLSET=unaided`. |
+| `reaction_class_lookup` | The verifier's own reaction classifier |
 | `emit_routes` | The verifier |
 
 The Task API lists splits and public task rows without references: `GET /retro_route/splits`, and `POST /retro_route/task`, `/tasks`, `/task_range` and `/num_tasks`. The API docs are at `/docs`.
@@ -53,23 +53,22 @@ uv sync --extra dev --extra eval
 RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL uv run bash envs/retro_route/openenv/start.sh
 ```
 
-`start.sh` runs `prepare.py`, which downloads the v3 benchmark from
-[AdithyaSK/RetroEnv-RL](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL) and verifies
-its checksums, then starts the server on it. Add `RETROENV_TASKS_SUBDIR=retroeval-v2` to serve
-v2. To serve a local directory instead:
+`start.sh` runs `prepare.py`, which downloads a released task dataset from the Hub
+(`RETROENV_TASKS_REPO`) and verifies its checksums, then starts the server on it. To serve a
+local release instead:
 
 ```bash
-RETROENV_BENCHMARK_DIR=benchmark/retroeval-v3 uv run uvicorn retroenv_openenv.server:app --port 8000
+RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
 ```
 
 Open <http://localhost:8000/web/> for the playground. To run one model episode against the server:
 
 ```bash
 uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000 \
-  --split eval --index 0 --provider anthropic --model claude-opus-5-5
+  --split test_id --index 0 --provider anthropic --model claude-opus-5-5
 ```
 
-`tasks-private/` is not in git for v2 and v3; download it from the Hub or rebuild it (see the benchmark READMEs). The committed v1 benchmark (`benchmark/retroeval-v1`) works without either.
+Releases are not in git; build one with `uv run python -m dataset.build_release` or download it from the Hub. `tests/fixtures/mini-release` is a small committed release for tests.
 
 ## Docker and Spaces
 
@@ -78,8 +77,8 @@ The image never contains the answer key. At startup `prepare.py` uses a mounted 
 ```bash
 python deploy.py --stage-only --stage-dir /tmp/retroenv-space
 docker build -t retroenv /tmp/retroenv-space
-docker run --rm -p 8000:8000 retroenv                       # v3 from the Hub
-docker run --rm -p 8000:8000 -v "$PWD/benchmark/retroeval-v3:/data:ro" \
+docker run --rm -p 8000:8000 retroenv                       # the release named by RETROENV_TASKS_REPO
+docker run --rm -p 8000:8000 -v "$PWD/data/release/RetroEnv-RL:/data:ro" \
   -e RETROENV_BENCHMARK_DIR=/data retroenv                  # a local directory
 ```
 
@@ -93,10 +92,10 @@ A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RETROENV_BENCHMARK_DIR` | none | Local benchmark directory with `tasks-private/` and `stocks/` |
+| `RETROENV_BENCHMARK_DIR` | none | Local release directory with `tasks-private/`, `stocks/` and `library/` |
 | `RETROENV_TASKS_REPO` | `AdithyaSK/RetroEnv-RL` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
-| `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset, e.g. `retroeval-v2` |
-| `RETROENV_TOOLSET` | `full` | `unaided` removes the tools that answer from hidden references |
+| `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset |
+| `RETROENV_TOOLSET` | `full` | `unaided` removes `validate_disconnection` (an ablation) |
 | `RETROENV_MAX_TOOL_CALLS` | `32` | Tool budget per episode |
 | `RETROENV_DEFAULT_SPLIT` | `train` | Split used by a reset that names none |
 | `MAX_CONCURRENT_ENVS` | `64` | WebSocket sessions per process |

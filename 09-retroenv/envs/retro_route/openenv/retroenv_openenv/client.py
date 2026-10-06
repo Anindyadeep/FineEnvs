@@ -59,12 +59,12 @@ class RetroEnvClient:
     # --- Task API over HTTP ----------------------------------------------
 
     def _post(self, route: str, payload: dict[str, Any]) -> Any:
-        response = httpx.post(f"{self.base_url}/{ENV_NAME}/{route}", json=payload, timeout=60)
+        response = httpx.post(f"{self.base_url}/{ENV_NAME}/{route}", json=payload, timeout=600)
         response.raise_for_status()
         return response.json()
 
     def splits(self) -> list[dict[str, Any]]:
-        response = httpx.get(f"{self.base_url}/{ENV_NAME}/splits", timeout=60)
+        response = httpx.get(f"{self.base_url}/{ENV_NAME}/splits", timeout=600)
         response.raise_for_status()
         return response.json()
 
@@ -202,20 +202,17 @@ class RemoteRetroRouteEnv:
             "reaction_precedent_search", product_smiles=product_smiles, reaction_class=reaction_class, limit=limit
         )
 
-    def validate_disconnection(self, product_smiles: str, reactants: list[str], reaction_class: str = "") -> str:
-        """Check one proposed product-to-reactants cut against hidden evidence.
+    def validate_disconnection(self, product_smiles: str, reactants: list[str]) -> str:
+        """Check one proposed cut against train-visible reactions and frequent templates.
 
         Args:
             product_smiles: The product of the step.
             reactants: The proposed reactant SMILES.
-            reaction_class: Optional reaction class.
         """
-        return self._call(
-            "validate_disconnection", product_smiles=product_smiles, reactants=reactants, reaction_class=reaction_class
-        )
+        return self._call("validate_disconnection", product_smiles=product_smiles, reactants=reactants)
 
     def reaction_class_lookup(self, product_smiles: str, reactants: list[str]) -> str:
-        """Name the class of a supported cut.
+        """Name the reaction class of a proposed cut.
 
         Args:
             product_smiles: The product of the step.

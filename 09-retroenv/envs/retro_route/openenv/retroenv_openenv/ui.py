@@ -117,12 +117,12 @@ class PlaygroundSession:
 def build_ui(*_: Any, **__: Any) -> gr.Blocks:
     store = shared_resources().store
     splits = store.splits()
-    default_split = "eval" if "eval" in splits else splits[0]
+    default_split = "test_id" if "test_id" in splits else splits[0]
 
     def task_choices(split: str) -> list[tuple[str, int]]:
         return [
             (
-                f"{i:03d} · {task.max_steps} steps · {task.min_routes} route{'s' if task.min_routes > 1 else ''} · "
+                f"{i:03d} · {task.variant} · depth ≤ {task.max_depth} · {task.min_routes} route{'s' if task.min_routes > 1 else ''} · "
                 f"{task.target_smiles[:48]}",
                 i,
             )

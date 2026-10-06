@@ -1,16 +1,14 @@
 #!/usr/bin/env python3
 """Make the task bundle available before the server starts.
 
-The bundle is a benchmark directory (``tasks-private/``, ``stocks/`` and,
-optionally, ``checksums.json``) as written by the dataset scripts. It holds
-the reference routes, so it is never baked into the image:
+The bundle is a release directory (``tasks-private/``, ``stocks/``, ``library/``,
+``manifest.json`` and ``checksums.json``) as written by ``dataset/build_release.py``.
+It holds the hidden routes, so it is never baked into the image:
 
 * ``RETROENV_BENCHMARK_DIR`` set: use that directory as is (local runs).
 * ``RETROENV_TASKS_REPO=org/name[@revision]``: download that HF dataset into
-  ``RETROENV_PREPARED_DIR`` (default ``prepared``). The published benchmark is
-  ``AdithyaSK/RetroEnv-RL``: v3 at its root, v2 under ``retroeval-v2/``
-  (``RETROENV_TASKS_SUBDIR=retroeval-v2``). ``HF_TOKEN`` is needed only for a
-  private repo.
+  ``RETROENV_PREPARED_DIR`` (default ``prepared``); ``RETROENV_TASKS_SUBDIR`` selects a
+  subdirectory of the repo. ``HF_TOKEN`` is needed only for a private repo.
 
 Either way, files listed in ``checksums.json`` are verified.
 """
@@ -25,16 +23,16 @@ from pathlib import Path
 
 
 def verify(root: Path) -> None:
-    if not (root / "tasks-private").is_dir() or not (root / "stocks").is_dir():
-        raise SystemExit(f"{root} needs tasks-private/ and stocks/")
+    if not all((root / name).is_dir() for name in ("tasks-private", "stocks", "library")):
+        raise SystemExit(f"{root} needs tasks-private/, stocks/ and library/")
     manifest = root / "checksums.json"
     if not manifest.exists():
         print(f"prepare: {root} has no checksums.json; skipping verification", file=sys.stderr)
         return
     expected = json.loads(manifest.read_text())["sha256"]
-    # The tasks and the stock both decide rewards, so a missing or altered file
-    # is a startup failure, not something to skip.
-    required = {name for name in expected if name.startswith(("tasks-private/", "stocks/"))}
+    # The tasks, the stock and the reaction library all decide rewards, so a
+    # missing or altered file is a startup failure, not something to skip.
+    required = {name for name in expected if name.startswith(("tasks-private/", "stocks/", "library/"))}
     for name in sorted(required):
         path = root / name
         if not path.exists():
@@ -53,7 +51,7 @@ def main() -> int:
     repo = os.getenv("RETROENV_TASKS_REPO")
     if not repo:
         raise SystemExit(
-            "Set RETROENV_BENCHMARK_DIR, or RETROENV_TASKS_REPO to a task dataset (for example AdithyaSK/RetroEnv-RL)."
+            "Set RETROENV_BENCHMARK_DIR, or RETROENV_TASKS_REPO to a released task dataset on the Hub."
         )
     from huggingface_hub import snapshot_download
 
@@ -67,7 +65,7 @@ def main() -> int:
         revision=revision or None,
         local_dir=download,
         allow_patterns=[
-            f"{prefix}{name}" for name in ("tasks-private/*", "stocks/*", "checksums.json", "manifest.json")
+            f"{prefix}{name}" for name in ("tasks-private/*", "stocks/*", "library/*", "checksums.json", "manifest.json")
         ],
         token=os.getenv("HF_TOKEN") or None,
     )

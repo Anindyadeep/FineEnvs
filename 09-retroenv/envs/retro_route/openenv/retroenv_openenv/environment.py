@@ -9,6 +9,9 @@ carries ``done=True`` and the dense reward, exactly once.
 
 from __future__ import annotations
 
+import asyncio
+import functools
+import os
 import random
 from typing import Any
 
@@ -17,15 +20,28 @@ from fastmcp.tools import Tool
 from openenv.core.env_server.mcp_environment import MCPEnvironment
 from openenv.core.env_server.mcp_types import CallToolObservation
 from openenv.core.env_server.types import EnvironmentMetadata, Observation, State
-from retroenv.environment import RetroRouteSession
 from retroenv.tools import tool_spec
 
 from .config import ENV_NAME, Resources, shared_resources
 
+# OpenEnv's default is 30 s; a scored submission or a stock substructure search can take longer.
+TOOL_TIMEOUT_S = float(os.getenv("RETROENV_TOOL_TIMEOUT", "300"))
+
+
+def _threaded(handler: Any) -> Any:
+    """Run a synchronous tool off the event loop, so one slow call cannot stall other sessions."""
+
+    @functools.wraps(handler)
+    async def run(*args: Any, **kwargs: Any) -> Any:
+        return await asyncio.to_thread(handler, *args, **kwargs)
+
+    return run
+
+
 DESCRIPTION = (
     "Plan retrosynthesis routes for a target molecule from a fixed purchasable stock. "
-    "Tools inspect molecules, search the stock and training precedents, and check "
-    "disconnections; emit_routes submits molecule/reaction trees and returns the "
+    "Tools inspect molecules, search the stock and train-visible reactions, and check "
+    "disconnections against a frozen reaction library; emit_routes submits molecule/reaction trees and returns the "
     "verifier's dense reward."
 )
 
@@ -48,19 +64,14 @@ class RetroRouteEnvironment(MCPEnvironment):
     def __init__(self, resources: Resources | None = None):
         self.resources = resources or shared_resources()
         settings = self.resources.settings
-        self.session = RetroRouteSession(
-            max_tool_calls=settings.max_tool_calls,
-            precedent_index=self.resources.precedent_index,
-            pubchem_cache=self.resources.pubchem_cache,
-            toolset=settings.toolset,
-        )
+        self.session = self.resources.session()
         self._state = RetroRouteState(toolset=settings.toolset, max_tool_calls=settings.max_tool_calls)
         self._rng = random.Random()
         mcp = FastMCP("retroenv")
         handlers = self._handlers()
         for name in self.session.tool_names:
             spec = tool_spec(name)
-            tool = Tool.from_function(handlers[name], name=name, description=spec["description"])
+            tool = Tool.from_function(_threaded(handlers[name]), name=name, description=spec["description"])
             mcp.add_tool(tool.model_copy(update={"parameters": spec["parameters"]}))
         super().__init__(mcp)
 
@@ -81,10 +92,8 @@ class RetroRouteEnvironment(MCPEnvironment):
         ) -> dict[str, Any]:
             return self._record(session.reaction_precedent_search(product_smiles, reaction_class, limit))
 
-        def validate_disconnection(
-            product_smiles: str, reactants: list[str] | str, reaction_class: str = ""
-        ) -> dict[str, Any]:
-            return self._record(session.validate_disconnection(product_smiles, reactants, reaction_class or None))
+        def validate_disconnection(product_smiles: str, reactants: list[str] | str) -> dict[str, Any]:
+            return self._record(session.validate_disconnection(product_smiles, reactants))
 
         def reaction_class_lookup(product_smiles: str, reactants: list[str] | str) -> dict[str, Any]:
             return self._record(session.reaction_class_lookup(product_smiles, reactants))
@@ -146,7 +155,7 @@ class RetroRouteEnvironment(MCPEnvironment):
         tasks = self.resources.store.tasks(split)
         if not 0 <= int(index) < len(tasks):
             raise IndexError(f"task index {index} is out of range for split {split!r}")
-        return {"index": int(index), **tasks[int(index)].to_dict(include_references=False)}
+        return {"index": int(index), **tasks[int(index)].to_dict(include_hidden=False)}
 
     def get_task_range(self, split: str, start: int | None = None, stop: int | None = None) -> list[dict[str, Any]]:
         indices = range(*slice(start, stop).indices(self.num_tasks(split)))
@@ -204,7 +213,9 @@ class RetroRouteEnvironment(MCPEnvironment):
                 "index": index,
                 "task_id": task.task_id,
                 "target_smiles": task.target_smiles,
-                "max_steps": task.max_steps,
+                "variant": task.variant,
+                "max_depth": task.max_depth,
+                "constraints": task.constraints.to_dict(),
                 "min_routes": task.min_routes,
                 "max_routes": task.max_routes,
                 "stock_id": task.stock_id,
@@ -216,11 +227,12 @@ class RetroRouteEnvironment(MCPEnvironment):
 
     def step(self, action: Any, timeout_s: float | None = None, **kwargs: Any) -> Observation:
         was_done = self.session.done
-        return self._mark_terminal(super().step(action, timeout_s=timeout_s, **kwargs), was_done)
+        observation = super().step(action, timeout_s=timeout_s or TOOL_TIMEOUT_S, **kwargs)
+        return self._mark_terminal(observation, was_done)
 
     async def step_async(self, action: Any, timeout_s: float | None = None, **kwargs: Any) -> Observation:
         was_done = self.session.done
-        observation = await super().step_async(action, timeout_s=timeout_s, **kwargs)
+        observation = await super().step_async(action, timeout_s=timeout_s or TOOL_TIMEOUT_S, **kwargs)
         return self._mark_terminal(observation, was_done)
 
     def _mark_terminal(self, observation: Observation, was_done: bool) -> Observation:
@@ -245,5 +257,5 @@ class RetroRouteEnvironment(MCPEnvironment):
         return EnvironmentMetadata(
             name=ENV_NAME,
             description=DESCRIPTION,
-            version="0.2.0",
+            version="0.3.0",
         )

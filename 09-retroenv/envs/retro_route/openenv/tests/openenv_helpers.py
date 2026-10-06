@@ -11,14 +11,13 @@ import httpx
 import pytest
 from retroenv_openenv.config import Resources, Settings
 
-# The committed v1 benchmark has private references, so tests can score oracles.
-BENCHMARK = Path(__file__).resolve().parents[4] / "benchmark" / "retroeval-v1"
+# A small release cut from a full build (tests/fixtures/build_fixture.py), with hidden routes.
+BENCHMARK = Path(__file__).resolve().parents[4] / "tests" / "fixtures" / "mini-release"
 
 
 def settings(**overrides) -> Settings:
     values = {
-        "tasks_dir": BENCHMARK / "tasks-private",
-        "stocks_dir": BENCHMARK / "stocks",
+        "benchmark_dir": BENCHMARK,
         "default_split": "train",
         "max_tool_calls": 32,
         "toolset": "full",
@@ -30,7 +29,7 @@ def settings(**overrides) -> Settings:
 @pytest.fixture(scope="session")
 def resources() -> Resources:
     if not BENCHMARK.exists():
-        pytest.skip("benchmark/retroeval-v1 is not available")
+        pytest.skip("tests/fixtures/mini-release is not available")
     return Resources.load(settings())
 
 
@@ -71,7 +70,7 @@ def _serve(extra_env: dict[str, str]):
 @pytest.fixture(scope="session")
 def server_url():
     if not BENCHMARK.exists():
-        pytest.skip("benchmark/retroeval-v1 is not available")
+        pytest.skip("tests/fixtures/mini-release is not available")
     process, url = _serve({"ENABLE_WEB_INTERFACE": "true"})
     yield url
     process.terminate()

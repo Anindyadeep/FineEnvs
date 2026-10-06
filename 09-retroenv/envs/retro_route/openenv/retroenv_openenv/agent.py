@@ -11,17 +11,22 @@ submitting an empty route set, which scores the verifier's floor.
 from __future__ import annotations
 
 import json
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Any
 
+import json_repair
+
 from .client import RetroEnvClient
 
 SYSTEM_PROMPT = (
-    "You are a retrosynthesis planning agent. Use tools, validate cuts, confirm every stock "
-    "leaf by exact lookup, and finish only with emit_routes. You have at most {max_turns} "
-    "model turns and must reserve the final turn for emit_routes even if the routes are "
-    "incomplete. Pass emit_routes.submission as a JSON object, not as a string. Do not "
+    "You are a retrosynthesis planning agent. Plan with the tools: inspect molecules, search "
+    "precedents, check each disconnection with validate_disconnection, and confirm every leaf "
+    "with an exact stock_retrieve lookup before claiming in_stock=true. Respect the depth "
+    "budget and any constraint in the task. Finish only with emit_routes. You have at most "
+    "{max_turns} model turns and must reserve the final turn for emit_routes even if the routes "
+    "are incomplete. Pass emit_routes.submission as a JSON object, not as a string. Do not "
     "reveal chain-of-thought; put short evidence-based explanations in reaction metadata."
 )
 
@@ -35,20 +40,17 @@ FINAL_TURN = (
 def normalize_arguments(name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], bool]:
     """Undo one provider-side encoding slip: a route submission sent as a JSON string.
 
-    Some models serialize a deeply nested argument into a string, sometimes with
-    one stray closing bracket from the wrapper object. The harness decodes that
-    before the call (and flags it) so the score measures the routes, not the
-    transport. Anything else is passed through for the verifier to judge.
+    Some models serialize a deeply nested argument into a string and then break
+    its escaping or brackets. The harness repairs that string before the call
+    (and flags it) so the score measures the routes, not the transport. Anything
+    that does not repair into a route-set object is passed through for the
+    verifier to judge.
     """
     value = arguments.get("submission")
     if name != "emit_routes" or not isinstance(value, str):
         return arguments, False
-    try:
-        decoded, end = json.JSONDecoder().raw_decode(value.strip())
-    except ValueError:
-        return arguments, False
-    rest = value.strip()[end:].strip()
-    if not isinstance(decoded, dict) or rest.strip("}]") != "":
+    decoded = json_repair.loads(value)
+    if not isinstance(decoded, dict) or "routes" not in decoded:
         return arguments, False
     return {**arguments, "submission": decoded}, True
 
@@ -69,6 +71,31 @@ class AgentConfig:
     extra_body: dict[str, Any] = field(default_factory=dict)
 
 
+RETRY_DELAYS = (5, 15, 30, 60, 90, 120)
+TRANSIENT = ("RateLimitError", "APITimeoutError", "APIConnectionError", "InternalServerError")
+# InternLM reports rate limits as HTTP 400 with this error code.
+RATE_LIMIT_CODES = ("-20048",)
+
+
+def _is_transient(exc: Exception) -> bool:
+    return type(exc).__name__ in TRANSIENT or getattr(exc, "code", None) in RATE_LIMIT_CODES
+
+
+def _request_with_retry(client: Any, config: AgentConfig, messages: list, tools: list) -> Any:
+    """Retry rate limits, timeouts, 5xx and empty responses; other errors surface at once."""
+    for delay in (*RETRY_DELAYS, None):
+        try:
+            response = _request(client, config, messages, tools)
+        except Exception as exc:
+            if delay is None or not _is_transient(exc):
+                raise
+        else:
+            if response.choices or delay is None:
+                return response
+        time.sleep(delay + random.uniform(0, delay / 4))
+    raise RuntimeError("unreachable")
+
+
 def _request(client: Any, config: AgentConfig, messages: list, tools: list) -> Any:
     kwargs: dict[str, Any] = {
         "model": config.model,
@@ -86,6 +113,16 @@ def _request(client: Any, config: AgentConfig, messages: list, tools: list) -> A
     if config.extra_body:
         kwargs["extra_body"] = config.extra_body
     return client.chat.completions.create(**kwargs)
+
+
+def recorded(entry: dict[str, Any], message: Any) -> dict[str, Any]:
+    """The transcript form of an assistant turn: the entry sent back to the model, plus its thinking.
+
+    Providers return thinking beside the reply, as ``reasoning`` (OpenRouter) or ``reasoning_content``
+    (vLLM-style servers). It is kept out of the history the model is sent, which stays unchanged.
+    """
+    thinking = getattr(message, "reasoning", None) or getattr(message, "reasoning_content", None)
+    return {**entry, "reasoning": str(thinking)} if thinking else entry
 
 
 def close_episode(env: RetroEnvClient) -> tuple[dict[str, Any], Any]:
@@ -138,7 +175,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
             messages.append(final_turn)
             transcript.append(final_turn)
         try:
-            response = _request(llm, config, messages, emit_tool if terminal_turn else tools)
+            response = _request_with_retry(llm, config, messages, emit_tool if terminal_turn else tools)
         except Exception as exc:  # provider errors end the episode; it is still scored
             errors.append(f"API error: {type(exc).__name__}: {str(exc)[:500]}")
             break
@@ -160,7 +197,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
             errors.append(f"no tool call on turn {turn_index + 1}: {(message.content or '')[:200]}")
             assistant = {"role": "assistant", "content": message.content or ""}
             messages.append(assistant)
-            transcript.append(assistant)
+            transcript.append(recorded(assistant, message))
             if terminal_turn:
                 break
             force_terminal = empty_turns >= config.max_empty_turns
@@ -184,7 +221,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
             "tool_calls": [call.model_dump(exclude_none=True) for call in calls],
         }
         messages.append(assistant)
-        transcript.append(assistant)
+        transcript.append(recorded(assistant, message))
         for call in calls:
             name = call.function.name
             try:
@@ -230,7 +267,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
     return {
         "reward": final.get("reward", 0.0),
         "valid": bool(final.get("valid", False)),
-        "exact_match": bool((final.get("metrics") or {}).get("exact_reference_match", False)),
+        "exact_match": bool((final.get("metrics") or {}).get("reference_match", False)),
         "components": final.get("components", {}),
         "hard_failures": final.get("hard_failures", []),
         "verification_tier": final.get("verification_tier"),

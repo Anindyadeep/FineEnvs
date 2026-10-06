@@ -66,7 +66,8 @@ def target_panel(opening: dict[str, Any] | None, state: Any = None) -> str:
     rows = [
         ("Task", f'<span class="mono">{html.escape(opening["task_id"])}</span>'),
         ("Target", f'<span class="mono">{html.escape(opening["target_smiles"])}</span>'),
-        ("Steps", f"at most {opening['max_steps']}"),
+        ("Depth", f"at most {opening['max_depth']} reactions (longest linear sequence)"),
+        ("Variant", html.escape(opening.get("variant", "standard"))),
         ("Routes", f"{opening['min_routes']} to {opening['max_routes']}"),
         ("Stock", html.escape(opening["stock_id"])),
         ("Tool calls left", f"{remaining} of {opening['max_tool_calls']}"),

@@ -15,6 +15,7 @@ dependencies = [
     "uvicorn[standard]>=0.30",
     "huggingface-hub>=0.25",
     "openai>=1.55",
+    "json-repair>=0.30",
 ]
 
 [project.optional-dependencies]

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Minimal multi-turn GRPO smoke run for the six-task RetroEnv sample.
+"""Minimal multi-turn GRPO smoke run on a RetroEnv release.
 
 Run this from the project checkout in a TRL image/environment. It is deliberately
 small: prove the base model can use the graph tools and overfit a few indexed
@@ -28,22 +28,19 @@ NUM_GENERATIONS = int(os.getenv("NUM_GENERATIONS", "4"))
 MAX_STEPS = int(os.getenv("MAX_STEPS", "10"))
 SEED = int(os.getenv("SEED", "17"))
 SERVER = os.getenv("RETROENV_SERVER")
-# Curriculum: train only on tasks whose route needs at most this many steps
-# (v3 has 2- to 5-step tasks); raise it once the shorter ones are solved.
+# Curriculum: train only on tasks whose depth budget is at most this many reactions;
+# raise it once the shorter ones are solved.
 MAX_ROUTE_STEPS = int(os.getenv("MAX_ROUTE_STEPS", "99"))
+RELEASE = Path(os.getenv("RETROENV_BENCHMARK_DIR", Path(__file__).resolve().parents[1] / "data/release/RetroEnv-RL"))
+os.environ.setdefault("RETROENV_BENCHMARK_DIR", str(RELEASE))  # read by RetroRouteTrainingEnv()
 
 
 def train_route_steps() -> list[int]:
-    """Each train task's step budget, in index order (a public field)."""
+    """Each train task's depth budget, in index order (a public field)."""
     if SERVER:
         with RetroEnvClient(SERVER) as client:
-            return [int(task["max_steps"]) for task in client.tasks("train")]
-    root = Path(__file__).resolve().parents[1]
-    store = TaskStore(
-        os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"),
-        os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"),
-    )
-    return [task.max_steps for task in store.tasks("train")]
+            return [int(task["max_depth"]) for task in client.tasks("train")]
+    return [task.max_depth for task in TaskStore(RELEASE / "tasks-private", RELEASE / "stocks").tasks("train")]
 
 
 def build_dataset() -> Dataset:
