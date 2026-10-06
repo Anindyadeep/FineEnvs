@@ -4,10 +4,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "retroenv-core"
-version = "0.2.0"
+version = "0.3.0"
 description = "RetroEnv domain logic: RDKit chemistry, stock search, tasks, verifier, and the tool session"
 requires-python = ">=3.11"
-dependencies = ["rdkit>=2024.3.5"]
+dependencies = ["rdkit>=2024.3.5", "rdchiral>=1.1", "numpy>=1.26"]
 
 [project.optional-dependencies]
 ord = ["ord-schema>=0.3", "pyarrow>=15"]
@@ -15,8 +15,6 @@ sources = ["ord-schema>=0.3", "pyarrow>=15", "py7zr>=0.22"]
 
 [project.scripts]
 retroenv-build-corpus = "retroenv.corpus:main"
-retroenv-build-tasks = "retroenv.taskgen:main"
-retroenv-eval = "retroenv.evaluation:main"
 retroenv-prepare-source = "retroenv.adapters:main"
 
 [tool.setuptools.packages.find]

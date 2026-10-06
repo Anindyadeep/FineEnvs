@@ -102,8 +102,6 @@ ROUTE_GRAPH_DEFS: dict[str, Any] = {
     },
 }
 
-# Byte-for-byte the schemas behind the v1 board (eval/run_model.py), so its
-# tool_schema_sha256 is unchanged by the move into core.
 TOOLS = [
     _function("inspect_molecule", "Inspect a molecule with RDKit.", {"smiles": SMILES}, ["smiles"]),
     _function(
@@ -128,7 +126,7 @@ TOOLS = [
     ),
     _function(
         "reaction_precedent_search",
-        "Find reaction analogues from training-visible records.",
+        "Find similar reactions in the train-visible corpus, ranked by product similarity.",
         {
             "product_smiles": SMILES,
             "reaction_class": {"type": "string"},
@@ -137,19 +135,19 @@ TOOLS = [
     ),
     _function(
         "validate_disconnection",
-        "Validate one proposed product-to-reactants cut against hidden evidence.",
-        {"product_smiles": SMILES, "reactants": REACTANTS, "reaction_class": {"type": "string"}},
+        "Check whether train-visible reactions or frequent templates support a proposed product-to-reactants cut.",
+        {"product_smiles": SMILES, "reactants": REACTANTS},
         ["product_smiles", "reactants"],
     ),
     _function(
         "reaction_class_lookup",
-        "Name the class of an agent-supplied supported cut.",
+        "Name the reaction class of any proposed cut with the verifier's own labeller.",
         {"product_smiles": SMILES, "reactants": REACTANTS},
         ["product_smiles", "reactants"],
     ),
     _function(
         "reaction_conditions_search",
-        "Find frozen reported conditions for a cut or analogue.",
+        "Reagent sets reported for train-visible analogues of a cut or product.",
         {
             "product_smiles": SMILES,
             "reactants": REACTANTS,
@@ -159,7 +157,7 @@ TOOLS = [
     ),
     _function(
         "search_literature",
-        "Search frozen citation metadata attached to training precedents.",
+        "Patent identifiers attached to train-visible analogue reactions.",
         {
             "product_smiles": SMILES,
             "reaction_class": {"type": "string"},
@@ -192,13 +190,11 @@ TOOLS = [
 EMIT_TOOL = next(tool for tool in TOOLS if tool["function"]["name"] == "emit_routes")
 
 ALL_TOOL_NAMES = tuple(tool["function"]["name"] for tool in TOOLS)
-# Tools whose answers come from the task's hidden reference routes. "unaided"
-# removes them, and reaction_conditions_search then answers from training
-# analogues only, so an agent can no longer test guesses against the answer.
-ORACLE_TOOLS = ("validate_disconnection", "reaction_class_lookup")
+# No tool reads a task's hidden routes. "unaided" is an ablation without the step checker.
+ASSIST_TOOLS = ("validate_disconnection",)
 TOOLSETS: dict[str, tuple[str, ...]] = {
     "full": ALL_TOOL_NAMES,
-    "unaided": tuple(name for name in ALL_TOOL_NAMES if name not in ORACLE_TOOLS),
+    "unaided": tuple(name for name in ALL_TOOL_NAMES if name not in ASSIST_TOOLS),
 }
 
 

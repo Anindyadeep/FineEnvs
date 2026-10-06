@@ -1,512 +1,392 @@
-"""Conservative step and route verification with explicit evidence tiers."""
+"""Chemistry-first scoring of a submitted route set.
+
+A route is valid when it starts at the target, is a well-formed tree within the
+depth budget, every step is supported by the frozen reaction library (corpus
+reaction or frequent retro-template; never the task's hidden route), every
+leaf is in the task's effective stock, no leaf falsely claims stock, and the
+task constraints hold. Known routes are evidence for a bonus, not the
+definition of correctness.
+"""
 
 from __future__ import annotations
 
-import re
-from collections import Counter
+from dataclasses import dataclass, field
 from functools import lru_cache
 from typing import Any, Iterable
 
-from .chemistry import (
-    ChemistryError,
-    canonical_step_key,
-    canonicalize_components,
-    canonicalize_smiles,
-    formula_counter,
-    template_produces,
-)
-from .graph import parse_submission
-from .models import ReactionStep, RetroTask, ScoreResult, StepValidation
+from .chemistry import ChemistryError, canonicalize_smiles
+from .classes import classify_step
+from .graph import ParsedTree, parse_submission, routes_to_submission
+from .models import ReferenceRoute, RetroTask, ScoreResult
+from .reactions import ReactionLibrary, StepKey, free_key
 
 WEIGHTS = {
-    "structural_validity": 0.30,
-    "route_integrity": 0.25,
-    "building_block_completion": 0.20,
-    "reference_similarity": 0.15,
+    "parse": 0.02,
+    "structure": 0.08,
+    "steps": 0.35,
+    "stock": 0.15,
+    "constraints": 0.10,
     "efficiency": 0.10,
-}
-
-# Unlike the legacy all-or-nothing route score, the training-facing graph
-# reward stays differentiated for malformed, partial, and nearly-correct
-# submissions. This is important for GRPO groups from weak base models.
-GRAPH_WEIGHTS = {
-    "parse_validity": 0.05,
-    "molecule_validity": 0.10,
-    "graph_validity": 0.10,
-    "step_correctness": 0.20,
-    "stock_correctness": 0.10,
+    "diversity": 0.05,
     "reference_similarity": 0.10,
-    "exact_route_match": 0.10,
-    "verified_route_diversity": 0.10,
-    # Meeting the requested route-set cardinality is a discrete contract. It
-    # receives enough weight that emitting one perfect route cannot nearly tie
-    # a compliant set, while all other fields remain densely shaped.
-    "route_set_compliance": 0.15,
+    "reference_match": 0.05,
 }
+# A false in-stock claim or a submission that never addresses the target cannot score highly.
+FALSE_STOCK_CAP = 0.40
+OFF_TARGET_CAP = 0.10
+
+
+@dataclass
+class RouteEvaluation:
+    index: int
+    root_ok: bool
+    signature: frozenset[StepKey] = frozenset()
+    first_cut: tuple[str, ...] = ()
+    depth: int = 0
+    duplicate: bool = False
+    step_results: list[dict[str, Any]] = field(default_factory=list)
+    leaves_in_stock: int = 0
+    leaves_claimed_correctly: int = 0
+    leaf_count: int = 0
+    false_claims: list[str] = field(default_factory=list)
+    missing_stock: list[str] = field(default_factory=list)
+    violations: list[str] = field(default_factory=list)
+    errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
+    molecule_validity: float = 0.0
+
+    @property
+    def supported_fraction(self) -> float:
+        if not self.step_results:
+            return 0.0
+        return sum(result["supported"] for result in self.step_results) / len(self.step_results)
+
+    @property
+    def valid(self) -> bool:
+        return (
+            self.root_ok
+            and not self.duplicate
+            and not self.errors
+            and bool(self.step_results)
+            and self.supported_fraction == 1.0
+            and self.leaf_count > 0
+            and self.leaves_in_stock == self.leaf_count
+            and not self.false_claims
+            and not self.violations
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "index": self.index,
+            "valid": self.valid,
+            "root_matches_target": self.root_ok,
+            "duplicate_of_earlier_route": self.duplicate,
+            "depth": self.depth,
+            "steps": len(self.step_results),
+            "supported_steps": sum(result["supported"] for result in self.step_results),
+            "leaves": self.leaf_count,
+            "leaves_in_stock": self.leaves_in_stock,
+            "false_stock_claims": self.false_claims,
+            "missing_stock": self.missing_stock,
+            "constraint_violations": self.violations,
+            "first_cut": list(self.first_cut),
+            "errors": self.errors,
+            "warnings": self.warnings[:10],
+        }
 
 
 class RouteVerifier:
-    """Verify only what RDKit and the task's hidden evidence can establish."""
+    """Score submissions with a reaction library; hidden routes only inform the bonus."""
 
-    def _canonical_stock(self, stock: Iterable[str]) -> frozenset[str]:
-        if isinstance(stock, frozenset):
-            return _canonicalize_frozen_stock(stock)
-        return frozenset(canonicalize_smiles(item) for item in stock)
+    def __init__(self, library: ReactionLibrary):
+        self.library = library
 
-    def validate_step(
-        self,
-        task: RetroTask,
-        product: str,
-        reactants: Iterable[str],
-        reaction_class: str | None = None,
-    ) -> StepValidation:
-        errors: list[str] = []
-        checks = {
-            "valid_structures": False,
-            "no_product_leakage": False,
-            "atom_inventory_conserved": False,
-            "reaction_class_compatible": False,
-            "dataset_or_template_support": False,
-        }
-        try:
-            canonical_product = canonicalize_smiles(product)
-            canonical_reactants = canonicalize_components(reactants)
-            if not canonical_reactants:
-                raise ChemistryError("a step needs at least one reactant")
-            checks["valid_structures"] = True
-        except Exception as exc:
-            return StepValidation(
-                valid=False,
-                product=None,
-                reactants=(),
-                support="none",
-                matched_reaction_id=None,
-                atom_conservation="not_checked",
-                checks=checks,
-                errors=(str(exc),),
-            )
-
-        checks["no_product_leakage"] = canonical_product not in canonical_reactants
-        if not checks["no_product_leakage"]:
-            errors.append("step product is present unchanged among its reactants")
-
-        product_inventory = formula_counter((canonical_product,))
-        reactant_inventory = formula_counter(canonical_reactants)
-        missing_atoms = product_inventory - reactant_inventory
-        checks["atom_inventory_conserved"] = not missing_atoms
-        if missing_atoms:
-            rendered = ", ".join(f"{element}:{count}" for element, count in sorted(missing_atoms.items()))
-            errors.append("product atom inventory is not contained in the proposed reactants: " + rendered)
-
-        key = canonical_step_key(canonical_product, canonical_reactants)
-        references = [step for route in task.reference_routes for step in route.steps]
-        exact = None
-        for reference in references:
-            if canonical_step_key(reference.product, reference.reactants) == key:
-                exact = reference
-                break
-
-        support = "none"
-        matched_id = None
-        atom_conservation = "element_inventory_passed" if not missing_atoms else "element_inventory_failed"
-        class_compatible = True
-        if exact is not None:
-            support = "dataset_exact"
-            matched_id = exact.reaction_id
-            class_compatible = _class_compatible(reaction_class, exact.reaction_class)
-            if exact.mapping_status in {"complete", "partial"}:
-                atom_conservation = f"reference_mapping_{exact.mapping_status}"
-            else:
-                atom_conservation = "dataset_record_unmapped"
-        else:
-            for reference in references:
-                if not reference.reaction_smarts:
-                    continue
-                if not _class_compatible(reaction_class, reference.reaction_class):
-                    continue
-                if template_produces(
-                    reference.reaction_smarts,
-                    canonical_reactants,
-                    canonical_product,
-                ):
-                    support = "trusted_template"
-                    matched_id = reference.reaction_id
-                    atom_conservation = "template_execution"
-                    class_compatible = True
-                    break
-
-        checks["reaction_class_compatible"] = class_compatible
-        checks["dataset_or_template_support"] = support != "none"
-        if not class_compatible:
-            errors.append("provided reaction_class conflicts with hidden step evidence")
-        if support == "none":
-            errors.append("no exact dataset reaction or trusted template supports this step")
-
-        valid = all(checks.values())
-        return StepValidation(
-            valid=valid,
-            product=canonical_product,
-            reactants=canonical_reactants,
-            support=support,
-            matched_reaction_id=matched_id,
-            atom_conservation=atom_conservation,
-            checks=checks,
-            errors=tuple(errors),
-        )
-
-    def score_submission(
-        self,
-        task: RetroTask,
-        submission: Any,
-        stock: Iterable[str],
-    ) -> ScoreResult:
-        """Score one renderable route-set submission with dense components.
-
-        ``valid`` still means that the route-count contract was met and at
-        least one whole route passed the conservative chemistry verifier. The
-        scalar reward is intentionally denser: valid JSON with valid molecules
-        scores above a non-submission, while unsupported chemistry cannot earn
-        the high-value correctness components.
-        """
-
+    def score_submission(self, task: RetroTask, submission: Any, stock: Iterable[str]) -> ScoreResult:
         parsed = parse_submission(submission)
-        stock_set = self._canonical_stock(stock)
+        if not parsed.parse_valid:
+            return _rejected(parsed.errors)
+        stock_set = _canonical_stock(stock)
+        excluded = _canonical_stock(task.constraints.excluded_stock)
+        effective_stock = stock_set - excluded
         target = canonicalize_smiles(task.target_smiles)
-        route_count = len(parsed.trees)
-        count_in_bounds = task.min_routes <= route_count <= task.max_routes
-        route_results: list[ScoreResult] = []
-        graph_scores: list[float] = []
-        stock_claim_scores: list[float] = []
-        route_details: list[dict[str, Any]] = []
+        forbidden = frozenset(task.constraints.forbidden_classes)
 
+        routes: list[RouteEvaluation] = []
+        seen: set[frozenset[StepKey]] = set()
         for index, tree in enumerate(parsed.trees):
-            has_root = tree.root_smiles is not None
-            has_reaction = bool(tree.steps)
-            checks = {
-                "root_matches_target": has_root and tree.root_smiles == target,
-                "has_reaction": has_reaction,
-                "alternating_connected_tree": has_root and has_reaction and not tree.errors,
-                "within_step_budget": has_reaction and len(tree.steps) <= task.max_steps,
-            }
-            graph_score = sum(checks.values()) / len(checks)
-            graph_scores.append(graph_score)
-            claim_accuracy = (
-                sum((smiles in stock_set) == claim for smiles, claim in tree.terminal_claims)
-                / len(tree.terminal_claims)
-                if tree.terminal_claims
-                else 0.0
-            )
-            stock_claim_scores.append(claim_accuracy)
-            legacy = {"route": [step.to_dict(include_evidence=False) for step in tree.steps]}
-            result = self.score_route(task, legacy, stock_set)
-            route_results.append(result)
-            step_confidences = [
-                1.0 if step.valid else sum(step.checks.values()) / max(1, len(step.checks))
-                for step in result.step_results
-            ]
-            route_score = min(step_confidences) if step_confidences else 0.0
-            route_details.append(
-                {
-                    "index": index,
-                    "valid": result.valid,
-                    "verification_tier": result.verification_tier,
-                    "route_score": round(route_score, 6),
-                    "graph_score": round(graph_score, 6),
-                    "molecule_validity": round(tree.molecule_validity, 6),
-                    "stock_claim_accuracy": round(claim_accuracy, 6),
-                    "step_validity": result.metrics.get("step_validity", 0.0),
-                    "reference_similarity": result.metrics.get("reference_similarity", 0.0),
-                    "exact_reference_match": result.metrics.get("exact_reference_match", False),
-                    "first_cut": list(tree.first_cut),
-                    "errors": tree.errors,
-                    "hard_failures": list(result.hard_failures),
-                }
-            )
+            route = self._evaluate_tree(index, tree, target, task, effective_stock, excluded, forbidden)
+            if route.signature and route.signature in seen:
+                route.duplicate = True
+            seen.add(route.signature)
+            routes.append(route)
 
-        best_step = max(
-            (result.metrics.get("step_validity", 0.0) for result in route_results),
-            default=0.0,
-        )
-        best_stock = max(
+        references = compliant_references(task, effective_stock, forbidden)
+        min_depth = min((route_depth(task.target_smiles, ref.steps) for ref in references), default=None)
+        if min_depth is None:
+            min_depth = int(task.difficulty.get("min_depth") or task.max_depth)
+        reference_signatures = [(ref, signature(ref.steps)) for ref in references]
+
+        slots = max(len(routes), task.min_routes)
+        structure = steps = stock_score = constraints = efficiency = 0.0
+        for route in routes:
+            if route.duplicate:
+                continue
+            route_structure = [route.root_ok, not route.errors, bool(route.step_results), route.molecule_validity == 1.0, not route.warnings]
+            structure += sum(route_structure) / len(route_structure)
+            if not route.root_ok:
+                continue
+            steps += route.supported_fraction
+            if route.leaf_count:
+                stock_score += (route.leaves_in_stock + route.leaves_claimed_correctly) / (2 * route.leaf_count)
+            constraints += float(not route.violations)
+            if route.valid:
+                efficiency += min(1.0, min_depth / max(route.depth, 1))
+
+        valid_routes = [route for route in routes if route.valid]
+        distinct_cuts = {route.first_cut for route in valid_routes}
+        similarity = max(
             (
-                0.5 * result.metrics.get("building_block_completion", 0.0) + 0.5 * stock_claim_scores[index]
-                for index, result in enumerate(route_results)
+                _jaccard(route.signature, ref_signature)
+                for route in valid_routes
+                for _, ref_signature in reference_signatures
             ),
             default=0.0,
         )
-        best_similarity = max(
-            (result.metrics.get("reference_similarity", 0.0) for result in route_results),
-            default=0.0,
-        )
-        exact_match = any(result.metrics.get("exact_reference_match", False) for result in route_results)
-        valid_first_cuts = {
-            parsed.trees[index].first_cut
-            for index, result in enumerate(route_results)
-            if result.valid and parsed.trees[index].first_cut
-        }
-        diversity_denominator = max(1, min(task.min_routes, len(task.reference_routes)))
-        diversity = min(1.0, len(valid_first_cuts) / diversity_denominator)
-        structurally_countable = (
-            all(tree.root_smiles is not None and tree.molecule_validity > 0 for tree in parsed.trees)
-            if parsed.trees
-            else False
-        )
-        count_score = (
-            1.0
-            if count_in_bounds and structurally_countable
-            else (
-                route_count / task.min_routes
-                if structurally_countable and route_count < task.min_routes
-                else (task.max_routes / max(route_count, 1) if structurally_countable else 0.0)
-            )
-        )
-        graph_component = 0.75 * (sum(graph_scores) / len(graph_scores)) + 0.25 * count_score if graph_scores else 0.0
-        molecule_component = (
-            sum(tree.molecule_validity for tree in parsed.trees) / len(parsed.trees) if parsed.trees else 0.0
-        )
+        exact = any(route.signature == ref_signature for route in valid_routes for _, ref_signature in reference_signatures)
         components = {
-            "parse_validity": float(parsed.parse_valid),
-            "molecule_validity": molecule_component,
-            "graph_validity": graph_component,
-            "step_correctness": best_step,
-            "stock_correctness": best_stock,
-            "reference_similarity": best_similarity,
-            "exact_route_match": float(exact_match),
-            "verified_route_diversity": diversity,
-            "route_set_compliance": float(count_in_bounds and structurally_countable),
+            "parse": 1.0 if routes else 0.0,
+            "structure": structure / slots,
+            "steps": steps / slots,
+            "stock": stock_score / slots,
+            "constraints": constraints / slots,
+            "efficiency": efficiency / slots,
+            "diversity": min(1.0, len(distinct_cuts) / task.min_routes),
+            "reference_similarity": similarity,
+            "reference_match": float(exact),
         }
-        reward = sum(GRAPH_WEIGHTS[name] * value for name, value in components.items())
-        valid_route_count = sum(result.valid for result in route_results)
-        enough_valid_routes = valid_route_count >= task.min_routes
-        enough_distinct_routes = len(valid_first_cuts) >= task.min_routes
-        valid = parsed.parse_valid and count_in_bounds and enough_valid_routes and enough_distinct_routes
-        tiers = [result.verification_tier for result in route_results if result.valid]
-        tier = "dataset_supported" if "dataset_supported" in tiers else ("template_supported" if tiers else "rejected")
+        reward = sum(WEIGHTS[name] * value for name, value in components.items())
         failures = list(parsed.errors)
-        for index, tree in enumerate(parsed.trees):
-            failures.extend(f"route {index + 1}: {error}" for error in tree.errors)
-        if not count_in_bounds:
-            failures.append(f"submission has {route_count} routes; expected {task.min_routes}..{task.max_routes}")
-        if not enough_valid_routes:
+        if routes and not any(route.root_ok for route in routes):
+            reward = min(reward, OFF_TARGET_CAP)
+            failures.append("no submitted route starts at the target")
+        if any(route.false_claims for route in routes):
+            reward = min(reward, FALSE_STOCK_CAP)
+            failures.append("a leaf claims in_stock=true but is not in the task's stock")
+        if len(routes) > task.max_routes:
+            failures.append(f"submitted {len(routes)} routes; at most {task.max_routes} allowed")
+        if len(distinct_cuts) < task.min_routes:
             failures.append(
-                f"only {valid_route_count} submitted routes passed the chemistry verifier; "
-                f"need at least {task.min_routes}"
+                f"{len(distinct_cuts)} valid route(s) with distinct first disconnections; need {task.min_routes}"
             )
-        if not enough_distinct_routes:
-            failures.append(
-                f"only {len(valid_first_cuts)} distinct verified first cuts; need at least {task.min_routes}"
-            )
+        for route in routes:
+            failures.extend(f"route {route.index + 1}: {problem}" for problem in _route_problems(route))
+        solved = len(distinct_cuts) >= task.min_routes and len(routes) <= task.max_routes
+        supports = [result["support"] for route in valid_routes for result in route.step_results]
+        tier = "rejected" if not solved else ("template_supported" if "template" in supports else "corpus_supported")
+        all_steps = [result for route in routes for result in route.step_results]
+        claimed = [route for route in routes if route.root_ok]
         metrics = {
-            "route_count": route_count,
-            "route_count_in_bounds": count_in_bounds,
-            "valid_routes": valid_route_count,
-            "parse_valid": parsed.parse_valid,
-            "molecule_validity": round(molecule_component, 6),
-            "graph_validity": round(graph_component, 6),
-            "step_validity": round(best_step, 6),
-            "building_block_completion": round(best_stock, 6),
-            "reference_similarity": round(best_similarity, 6),
-            "exact_reference_match": exact_match,
-            "verified_route_diversity": round(diversity, 6),
-            "route_results": route_details,
+            "route_count": len(routes),
+            "valid_routes": len(valid_routes),
+            "distinct_valid_first_cuts": len(distinct_cuts),
+            "step_validity": round(sum(r["supported"] for r in all_steps) / len(all_steps), 6) if all_steps else 0.0,
+            "stock_precision": _stock_precision(claimed),
+            "constraint_compliance": round(constraints / slots, 6),
+            "min_known_depth": min_depth,
+            "best_valid_depth": min((route.depth for route in valid_routes), default=None),
+            "reference_similarity": round(similarity, 6),
+            "reference_match": exact,
+            "routes": [route.to_dict() for route in routes],
         }
         return ScoreResult(
-            reward=round(reward, 6),
-            valid=valid,
+            reward=round(min(1.0, max(0.0, reward)), 6),
+            valid=solved,
             verification_tier=tier,
-            hard_failures=tuple(_unique(failures)),
+            hard_failures=tuple(dict.fromkeys(failures)),
             components={name: round(value, 6) for name, value in components.items()},
             metrics=metrics,
-            step_results=tuple(step for result in route_results for step in result.step_results),
+            step_results=tuple(all_steps),
         )
 
-    def score_route(
+    def _evaluate_tree(
         self,
+        index: int,
+        tree: ParsedTree,
+        target: str,
         task: RetroTask,
-        route: dict[str, Any] | list[dict[str, Any]],
-        stock: Iterable[str],
-    ) -> ScoreResult:
-        hard_failures: list[str] = []
-        raw_steps = route.get("route", route.get("steps", [])) if isinstance(route, dict) else route
-        if not isinstance(raw_steps, list):
-            return self._failed("route must be a list of step objects")
-        if not raw_steps:
-            return self._failed("route is empty")
-        if len(raw_steps) > task.max_steps:
-            hard_failures.append(f"route has {len(raw_steps)} steps but max_steps is {task.max_steps}")
-
-        steps: list[ReactionStep] = []
-        for index, raw in enumerate(raw_steps):
-            try:
-                parsed = ReactionStep.from_dict(raw)
-                steps.append(
-                    ReactionStep(
-                        product=canonicalize_smiles(parsed.product),
-                        reactants=canonicalize_components(parsed.reactants),
-                        reaction_class=parsed.reaction_class,
-                    )
-                )
-            except Exception as exc:
-                hard_failures.append(f"step {index + 1}: invalid structure: {exc}")
-        if len(steps) != len(raw_steps):
-            return self._failed(*hard_failures, step_count=len(raw_steps))
-
-        target = canonicalize_smiles(task.target_smiles)
-        stock_set = self._canonical_stock(stock)
-        products = [step.product for step in steps]
-        product_counts = Counter(products)
-        duplicates = sorted(product for product, count in product_counts.items() if count > 1)
-        if duplicates:
-            hard_failures.append(f"multiple steps produce the same intermediate: {duplicates}")
-        by_product = {step.product: step for step in steps}
-        if target not in by_product:
-            hard_failures.append("route does not expand the task target")
-        if any(step.product in step.reactants for step in steps):
-            hard_failures.append("a step leaks its unchanged product into its reactants")
-        if any(target in step.reactants for step in steps):
-            hard_failures.append("target product appears among route reactants")
-
-        reachable: set[str] = set()
-        terminals: set[str] = set()
-        visiting: set[str] = set()
-        cycle = False
-
-        def walk(product: str) -> None:
-            nonlocal cycle
-            if product in visiting:
-                cycle = True
-                return
-            if product in reachable:
-                return
-            step = by_product.get(product)
-            if step is None:
-                terminals.add(product)
-                return
-            visiting.add(product)
-            reachable.add(product)
-            for reactant in step.reactants:
-                if reactant in by_product:
-                    walk(reactant)
-                else:
-                    terminals.add(reactant)
-            visiting.remove(product)
-
-        if target in by_product:
-            walk(target)
-        if cycle:
-            hard_failures.append("route graph contains a cycle")
-        unreachable = sorted(set(by_product) - reachable)
-        if unreachable:
-            hard_failures.append(f"route contains unreachable steps: {unreachable}")
-
-        missing_stock = sorted(terminals - stock_set)
-        if missing_stock:
-            hard_failures.append(f"terminal molecules are unavailable: {missing_stock}")
-
-        step_results = tuple(
-            self.validate_step(task, step.product, step.reactants, step.reaction_class) for step in steps
+        stock: frozenset[str],
+        excluded: frozenset[str],
+        forbidden: frozenset[str],
+    ) -> RouteEvaluation:
+        route = RouteEvaluation(
+            index=index,
+            root_ok=tree.root_smiles == target and bool(tree.steps),
+            depth=tree.depth,
+            errors=list(tree.errors),
+            warnings=list(tree.warnings),
+            molecule_validity=tree.molecule_validity,
         )
-        for index, result in enumerate(step_results, 1):
-            if not result.valid:
-                hard_failures.append(f"step {index} unsupported: {'; '.join(result.errors)}")
-
-        hard_failures = _unique(hard_failures)
-        reference_similarity, exact_match, best_reference_steps = self._reference_match(task, steps)
-        step_validity = sum(result.valid for result in step_results) / len(step_results) if step_results else 0.0
-        stock_completion = (len(terminals) - len(missing_stock)) / len(terminals) if terminals else 0.0
-        efficiency = min(1.0, best_reference_steps / len(steps)) if steps else 0.0
-        metrics = {
-            "step_count": len(steps),
-            "step_validity": round(step_validity, 6),
-            "route_continuity": not cycle and not unreachable and target in by_product,
-            "terminal_count": len(terminals),
-            "building_block_completion": round(stock_completion, 6),
-            "missing_building_blocks": missing_stock,
-            "reference_similarity": round(reference_similarity, 6),
-            "exact_reference_match": exact_match,
-            "best_reference_steps": best_reference_steps,
-            "mapping_backed_steps": sum(
-                result.atom_conservation.startswith("reference_mapping") for result in step_results
-            ),
-            "template_backed_steps": sum(result.support == "trusted_template" for result in step_results),
-        }
-        if hard_failures:
-            return ScoreResult(
-                reward=0.0,
-                valid=False,
-                verification_tier="rejected",
-                hard_failures=tuple(hard_failures),
-                components={key: 0.0 for key in WEIGHTS},
-                metrics=metrics,
-                step_results=step_results,
+        keys: set[StepKey] = set()
+        for step in tree.steps:
+            support = self.library.support(step.product, step.reactants)
+            reaction_class = classify_step(step.product, step.reactants)
+            route.step_results.append(
+                {
+                    "product": step.product,
+                    "reactants": list(step.reactants),
+                    "supported": support.supported,
+                    "support": support.kind,
+                    "template_count": support.template_count,
+                    "stereo_match": support.stereo_match,
+                    "reaction_class": reaction_class.name,
+                    **({"error": support.error} if support.error else {}),
+                }
             )
-
-        components = {
-            "structural_validity": 1.0,
-            "route_integrity": 1.0,
-            "building_block_completion": 1.0,
-            "reference_similarity": reference_similarity,
-            "efficiency": efficiency,
-        }
-        reward = sum(WEIGHTS[key] * value for key, value in components.items())
-        tier = (
-            "template_supported"
-            if any(result.support == "trusted_template" for result in step_results)
-            else "dataset_supported"
-        )
-        return ScoreResult(
-            reward=round(reward, 6),
-            valid=True,
-            verification_tier=tier,
-            hard_failures=(),
-            components={key: round(value, 6) for key, value in components.items()},
-            metrics=metrics,
-            step_results=step_results,
-        )
-
-    def _reference_match(self, task: RetroTask, steps: list[ReactionStep]) -> tuple[float, bool, int]:
-        proposed = {canonical_step_key(step.product, step.reactants) for step in steps}
-        best = 0.0
-        exact = False
-        best_steps = min(len(route.steps) for route in task.reference_routes)
-        for route in task.reference_routes:
-            reference = {canonical_step_key(step.product, step.reactants) for step in route.steps}
-            union = proposed | reference
-            similarity = len(proposed & reference) / len(union) if union else 0.0
-            if similarity > best:
-                best = similarity
-                best_steps = len(route.steps)
-            exact = exact or proposed == reference
-        return best, exact, best_steps
-
-    @staticmethod
-    def _failed(*reasons: str, step_count: int = 0) -> ScoreResult:
-        return ScoreResult(
-            reward=0.0,
-            valid=False,
-            verification_tier="rejected",
-            hard_failures=tuple(_unique(list(reasons))),
-            components={key: 0.0 for key in WEIGHTS},
-            metrics={"step_count": step_count, "step_validity": 0.0},
-            step_results=(),
-        )
+            if support.product:
+                keys.add((support.product, support.reactants))
+            if reaction_class.name in forbidden:
+                route.violations.append(f"uses forbidden class {reaction_class.name!r}")
+        route.signature = frozenset(keys)
+        root_step = next((step for step in tree.steps if step.product == tree.root_smiles), None)
+        if root_step is not None:
+            try:
+                route.first_cut = free_key(root_step.product, root_step.reactants)[1]
+            except ChemistryError:
+                route.first_cut = ()
+        if tree.depth > task.max_depth:
+            route.violations.append(f"depth {tree.depth} exceeds max_depth {task.max_depth}")
+        for smiles, claim in tree.terminal_claims:
+            route.leaf_count += 1
+            available = smiles in stock
+            route.leaves_in_stock += available
+            route.leaves_claimed_correctly += available and claim
+            if claim and not available:
+                route.false_claims.append(smiles)
+            if not available:
+                route.missing_stock.append(smiles)
+            if smiles in excluded:
+                route.violations.append(f"uses excluded building block {smiles}")
+        return route
 
 
-def _class_compatible(proposed: str | None, reference: str | None) -> bool:
-    if not proposed or not reference:
-        return True
+def signature(steps: Iterable[Any]) -> frozenset[StepKey]:
+    keys = set()
+    for step in steps:
+        try:
+            keys.add(free_key(step.product, step.reactants))
+        except ChemistryError:
+            continue
+    return frozenset(keys)
 
-    def normalize(value: str) -> str:
-        return re.sub(r"[^a-z0-9]+", "", value.lower())
 
-    return normalize(proposed) == normalize(reference)
+def route_depth(target: str, steps: Iterable[Any]) -> int:
+    """Longest linear sequence of a flat route rooted at ``target``."""
+    by_product = {canonicalize_smiles(step.product): step for step in steps}
+
+    def depth(smiles: str, ancestry: frozenset[str]) -> int:
+        step = by_product.get(smiles)
+        if step is None or smiles in ancestry:
+            return 0
+        inner = ancestry | {smiles}
+        return 1 + max((depth(canonicalize_smiles(r), inner) for r in step.reactants), default=0)
+
+    return depth(canonicalize_smiles(target), frozenset())
 
 
-@lru_cache(maxsize=8)
-def _canonicalize_frozen_stock(stock: frozenset[str]) -> frozenset[str]:
-    """Canonicalize immutable stock once across verifiers and submissions."""
+def route_leaves(target: str, steps: Iterable[Any]) -> set[str]:
+    by_product = {canonicalize_smiles(step.product): step for step in steps}
+    leaves: set[str] = set()
+
+    def walk(smiles: str, ancestry: frozenset[str]) -> None:
+        step = by_product.get(smiles)
+        if step is None or smiles in ancestry:
+            leaves.add(smiles)
+            return
+        for reactant in step.reactants:
+            walk(canonicalize_smiles(reactant), ancestry | {smiles})
+
+    walk(canonicalize_smiles(target), frozenset())
+    return leaves
+
+
+def compliant_references(task: RetroTask, stock: frozenset[str], forbidden: frozenset[str]) -> list[ReferenceRoute]:
+    """Known routes that satisfy this task's depth, stock and class constraints."""
+    compliant = []
+    for route in task.reference_routes:
+        if route_depth(task.target_smiles, route.steps) > task.max_depth:
+            continue
+        if not route_leaves(task.target_smiles, route.steps) <= stock:
+            continue
+        if forbidden and any(classify_step(step.product, step.reactants).name in forbidden for step in route.steps):
+            continue
+        compliant.append(route)
+    return compliant
+
+
+def known_routes_submission(task: RetroTask, stock: frozenset[str]) -> dict[str, Any]:
+    """The shortest compliant known routes with distinct first cuts, as many as the task needs."""
+    available = _canonical_stock(stock) - _canonical_stock(task.constraints.excluded_stock)
+    references = sorted(
+        compliant_references(task, available, frozenset(task.constraints.forbidden_classes)),
+        key=lambda route: route_depth(task.target_smiles, route.steps),
+    )
+    target = canonicalize_smiles(task.target_smiles)
+    chosen, cuts = [], set()
+    for route in references:
+        root = next((step for step in route.steps if canonicalize_smiles(step.product) == target), None)
+        cut = free_key(root.product, root.reactants)[1] if root else ()
+        if cut and cut not in cuts:
+            cuts.add(cut)
+            chosen.append(route)
+    return routes_to_submission(task.target_smiles, chosen[: task.min_routes], available)
+
+
+def _route_problems(route: RouteEvaluation) -> list[str]:
+    problems = []
+    if route.duplicate:
+        problems.append("duplicates an earlier route")
+    if not route.root_ok:
+        problems.append("does not start with a reaction producing the target")
+    problems.extend(route.errors[:5])
+    unsupported = [r for r in route.step_results if not r["supported"]]
+    if unsupported:
+        problems.append(f"{len(unsupported)} step(s) not supported by the reaction library")
+    if route.missing_stock:
+        problems.append(f"leaves not in stock: {route.missing_stock[:5]}")
+    problems.extend(route.violations)
+    return problems
+
+
+def _stock_precision(routes: list[RouteEvaluation]) -> float | None:
+    claimed = sum(route.leaves_claimed_correctly + len(route.false_claims) for route in routes)
+    if not claimed:
+        return None
+    return round(sum(route.leaves_claimed_correctly for route in routes) / claimed, 6)
+
+
+def _jaccard(left: frozenset, right: frozenset) -> float:
+    union = left | right
+    return len(left & right) / len(union) if union else 0.0
+
+
+def _rejected(errors: list[str]) -> ScoreResult:
+    return ScoreResult(
+        reward=0.0,
+        valid=False,
+        verification_tier="rejected",
+        hard_failures=tuple(errors) or ("submission could not be parsed",),
+        components={name: 0.0 for name in WEIGHTS},
+        metrics={"route_count": 0, "valid_routes": 0},
+        step_results=(),
+    )
+
+
+def _canonical_stock(stock: Iterable[str]) -> frozenset[str]:
+    if isinstance(stock, frozenset):
+        return _canonicalize_frozen(stock)
     return frozenset(canonicalize_smiles(item) for item in stock)
 
 
-def _unique(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(value for value in values if value))
+@lru_cache(maxsize=8)
+def _canonicalize_frozen(stock: frozenset[str]) -> frozenset[str]:
+    return frozenset(canonicalize_smiles(item) for item in stock)

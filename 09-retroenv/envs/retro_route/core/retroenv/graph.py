@@ -23,6 +23,10 @@ class ParsedTree:
     valid_molecules: int = 0
     terminal_claims: list[tuple[str, bool]] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
+    # Missing or malformed reaction metadata: costs structure points, never invalidates chemistry.
+    warnings: list[str] = field(default_factory=list)
+    # Longest linear sequence: reactions on the longest root-to-leaf path.
+    depth: int = 0
 
     @property
     def graph_valid(self) -> bool:
@@ -134,21 +138,21 @@ def _parse_molecule_node(
         result.errors.append(f"{path}.children[0]: expected type='reaction'")
         return smiles
     if reaction.get("is_reaction") is not True:
-        result.errors.append(f"{path}.children[0].is_reaction must be true")
+        result.warnings.append(f"{path}.children[0].is_reaction must be true")
     metadata = reaction.get("metadata", {})
     if not isinstance(metadata, dict):
-        result.errors.append(f"{path}.children[0].metadata must be an object")
+        result.warnings.append(f"{path}.children[0].metadata must be an object")
         metadata = {}
     for required in ("explanation", "confidence", "literature", "precursor_roles"):
         if required not in metadata:
-            result.errors.append(f"{path}.children[0].metadata.{required} is required")
+            result.warnings.append(f"{path}.children[0].metadata.{required} is required")
     if not (metadata.get("reaction_class") or metadata.get("classification")):
-        result.errors.append(f"{path}.children[0].metadata.reaction_class is required")
+        result.warnings.append(f"{path}.children[0].metadata.reaction_class is required")
     confidence = metadata.get("confidence")
     if not isinstance(confidence, (int, float)) or isinstance(confidence, bool) or not 0 <= confidence <= 1:
-        result.errors.append(f"{path}.children[0].metadata.confidence must be between 0 and 1")
+        result.warnings.append(f"{path}.children[0].metadata.confidence must be between 0 and 1")
     if not isinstance(metadata.get("precursor_roles"), dict):
-        result.errors.append(f"{path}.children[0].metadata.precursor_roles must be an object")
+        result.warnings.append(f"{path}.children[0].metadata.precursor_roles must be an object")
     if "children" not in reaction:
         result.errors.append(f"{path}.children[0].children is required")
     reaction_children = reaction.get("children", [])
@@ -174,7 +178,7 @@ def _parse_molecule_node(
         else:
             literature = metadata.get("literature") or []
             if not isinstance(literature, list):
-                result.errors.append(f"{path}: metadata.literature must be a list")
+                result.warnings.append(f"{path}: metadata.literature must be a list")
                 literature = []
             conditions = metadata.get("conditions") or []
             if isinstance(conditions, dict):
@@ -190,6 +194,7 @@ def _parse_molecule_node(
                     literature=tuple(item for item in literature if isinstance(item, dict)),
                 )
             )
+            result.depth = max(result.depth, len(ancestry) + 1)
     return smiles
 
 

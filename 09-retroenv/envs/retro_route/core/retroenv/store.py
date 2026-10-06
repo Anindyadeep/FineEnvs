@@ -76,7 +76,7 @@ class TaskStore:
         return self._stocks[stock_id]
 
     def public_task(self, split: str, index: int) -> dict:
-        return self.task(split, index).to_dict(include_references=False)
+        return self.task(split, index).to_dict(include_hidden=False)
 
     def iter_all(self) -> Iterable[RetroTask]:
         for split in self.splits():

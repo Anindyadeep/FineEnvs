@@ -36,21 +36,28 @@ def parse_molecule(smiles: str) -> Chem.Mol:
     return mol
 
 
-def canonicalize_smiles(smiles: str, *, keep_atom_maps: bool = False) -> str:
+def canonicalize_smiles(smiles: str, *, keep_atom_maps: bool = False, isomeric: bool = True) -> str:
     mol = parse_molecule(smiles)
-    if not keep_atom_maps:
+    mapped = any(atom.GetAtomMapNum() for atom in mol.GetAtoms())
+    if mapped and not keep_atom_maps:
         for atom in mol.GetAtoms():
             atom.SetAtomMapNum(0)
-    return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=True)
+        # Map numbers break ring cis/trans symmetry during stereo perception; reparse without them.
+        mol = parse_molecule(Chem.MolToSmiles(mol, isomericSmiles=isomeric))
+    return Chem.MolToSmiles(mol, canonical=True, isomericSmiles=isomeric)
 
 
-def canonicalize_components(value: str | Iterable[str], *, keep_atom_maps: bool = False) -> tuple[str, ...]:
+def canonicalize_components(
+    value: str | Iterable[str], *, keep_atom_maps: bool = False, isomeric: bool = True
+) -> tuple[str, ...]:
     if isinstance(value, str):
         raw = value.split(".") if value.strip() else []
     else:
-        raw = list(value)
+        raw = [part for item in value for part in str(item).split(".")]
     components = [
-        canonicalize_smiles(str(item).strip(), keep_atom_maps=keep_atom_maps) for item in raw if str(item).strip()
+        canonicalize_smiles(item.strip(), keep_atom_maps=keep_atom_maps, isomeric=isomeric)
+        for item in raw
+        if item.strip()
     ]
     return tuple(sorted(components))
 
@@ -142,9 +149,9 @@ def audit_atom_mapping(reaction_smiles: str) -> dict[str, Any]:
     }
 
 
-def canonical_step_key(product: str, reactants: Iterable[str]) -> str:
-    canonical_product = canonicalize_smiles(product)
-    canonical_reactants = canonicalize_components(reactants)
+def canonical_step_key(product: str, reactants: Iterable[str], *, isomeric: bool = True) -> str:
+    canonical_product = canonicalize_smiles(product, isomeric=isomeric)
+    canonical_reactants = canonicalize_components(reactants, isomeric=isomeric)
     return f"{canonical_product}<<{'.'.join(canonical_reactants)}"
 
 

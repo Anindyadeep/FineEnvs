@@ -6,10 +6,12 @@ from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Iterable
 
+import numpy as np
 from rdkit import Chem, DataStructs
 from rdkit.Chem import Descriptors, rdFingerprintGenerator, rdMolDescriptors
 
-from .chemistry import canonical_step_key, canonicalize_smiles, scaffold_group_key
+from .chemistry import canonicalize_smiles
+from .leakage import Key, LeakageRules, molecule_keys, reaction_key, task_keys, task_molecules
 from .models import RetroTask
 
 CLASS_SMARTS = {
@@ -28,152 +30,110 @@ CLASS_SMARTS = {
 
 @dataclass(frozen=True)
 class Precedent:
-    task_id: str
     product: str
     reactants: tuple[str, ...]
-    reaction_class: str | None
-    reaction_id: str | None
-    conditions: tuple[dict[str, Any], ...]
-    literature: tuple[dict[str, Any], ...]
-    source: tuple[dict[str, Any], ...]
-    # Leakage keys in the namespaces of the split rules: molecule, scaffold, reaction, source.
-    keys: frozenset[tuple[str, str]] = frozenset()
-
-
-def _sources(route) -> set[tuple[str, str]]:
-    return {("source", f"{s.get('name', '')}:{s['group_id']}") for s in route.source if s.get("group_id")}
+    reaction_class: str
+    reagents: tuple[str, ...]
+    patents: tuple[str, ...]
+    keys: frozenset[Key]
 
 
 class PrecedentIndex:
-    """Search training-visible reaction steps without exposing eval references.
+    """Search train-visible corpus reactions without exposing held-out answers.
 
-    An eval task never meets its own reactions, its patent, its scaffolds or a
-    near-duplicate here, because the split kept all of them out of train. Given
-    the ``task``, ``search`` hides the same things from a train task, so a policy
-    trained on train cannot learn to look up answers that evaluation never offers.
-    ``exact_single_ring`` and ``generic`` must be the benchmark's own split rules
-    (``taskgen.audit_rules``); with them, nothing is hidden from a held-out task.
+    The builder marks a library reaction visible only when it shares no leakage
+    key with any held-out task, so held-out tasks see the whole visible corpus.
+    Given a train ``task``, ``search`` also hides that task's own keys and
+    near-duplicates, so a policy cannot learn to look up answers that held-out
+    evaluation never offers.
     """
 
-    def __init__(
-        self,
-        tasks: Iterable[RetroTask],
-        *,
-        exact_single_ring_scaffolds: bool = False,
-        generic_scaffolds: frozenset[str] = frozenset(),
-        near_duplicate_threshold: float = 0.90,
-    ):
-        self._scaffold = lambda smiles: scaffold_group_key(
-            smiles, exact_single_ring=exact_single_ring_scaffolds, generic=generic_scaffolds
-        )
-        self.near_duplicate_threshold = near_duplicate_threshold
-        self._hidden: dict[str, frozenset[int]] = {}
-        records: list[Precedent] = []
-        seen: set[str] = set()
-        for task in tasks:
-            for route in task.reference_routes:
-                for step in route.steps:
-                    key = canonical_step_key(step.product, step.reactants)
-                    if key in seen:
-                        continue
-                    seen.add(key)
-                    product = canonicalize_smiles(step.product)
-                    keys = {("molecule", product), ("scaffold", self._scaffold(product)), *_sources(route)}
-                    if step.reaction_id:
-                        keys.add(("reaction", step.reaction_id))
-                    records.append(
-                        Precedent(
-                            task_id=task.task_id,
-                            product=product,
-                            reactants=tuple(step.reactants),
-                            reaction_class=step.reaction_class,
-                            reaction_id=step.reaction_id,
-                            conditions=step.conditions,
-                            literature=step.literature,
-                            source=route.source,
-                            keys=frozenset(keys),
-                        )
-                    )
+    def __init__(self, reactions: Iterable[dict[str, Any]], rules: LeakageRules | None = None):
+        self.rules = rules or LeakageRules()
+        records = []
+        for row in reactions:
+            if not row.get("visible", True):
+                continue
+            product = row["product_smiles"]
+            reactants = tuple(row["reactant_smiles"])
+            keys = molecule_keys([product], self.rules) | {reaction_key(product, reactants)}
+            keys |= {("patent", patent) for patent in row.get("patents", ())}
+            records.append(
+                Precedent(
+                    product=product,
+                    reactants=reactants,
+                    reaction_class=row.get("reaction_class", "other"),
+                    reagents=tuple(row.get("reagents", ())),
+                    patents=tuple(row.get("patents", ())),
+                    keys=frozenset(keys),
+                )
+            )
         self.records = tuple(records)
-        generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-        self._fingerprints = tuple(
-            generator.GetFingerprint(Chem.MolFromSmiles(record.product)) for record in self.records
-        )
-        self._generator = generator
+        self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+        self._fingerprints = [self._generator.GetFingerprint(Chem.MolFromSmiles(r.product)) for r in self.records]
+        self._classes = np.array([_normalize_class(r.reaction_class) for r in self.records])
+        self._key_index: dict[Key, list[int]] = {}
+        for index, record in enumerate(self.records):
+            for key in record.keys:
+                self._key_index.setdefault(key, []).append(index)
+        self._hidden: dict[tuple[str, str], np.ndarray] = {}
 
-    def hidden(self, task: RetroTask) -> frozenset[int]:
-        """Indexes of records that share a leakage key with ``task`` or near-duplicate one of its molecules."""
-        cached = self._hidden.get(task.task_id)
+    def hidden(self, task: RetroTask) -> np.ndarray:
+        """Boolean mask of records sharing a leakage key with ``task`` or near-duplicating one of its molecules."""
+        cached = self._hidden.get((task.task_id, task.split))
         if cached is not None:
             return cached
-        molecules = {canonicalize_smiles(task.target_smiles)} | {
-            canonicalize_smiles(step.product) for route in task.reference_routes for step in route.steps
-        }
-        keys = {("molecule", m) for m in molecules} | {("scaffold", self._scaffold(m)) for m in molecules}
-        for route in task.reference_routes:
-            keys |= _sources(route)
-            keys |= {("reaction", step.reaction_id) for step in route.steps if step.reaction_id}
-        hidden = {i for i, record in enumerate(self.records) if record.keys & keys}
-        if self._fingerprints and self.near_duplicate_threshold > 0:
-            for smiles in molecules:
+        mask = np.zeros(len(self.records), dtype=bool)
+        if task.split == "train" and self.records:
+            for key in task_keys(task, self.rules):
+                mask[self._key_index.get(key, [])] = True
+            for smiles in task_molecules(task):
                 fingerprint = self._generator.GetFingerprint(Chem.MolFromSmiles(smiles))
-                similarities = DataStructs.BulkTanimotoSimilarity(fingerprint, self._fingerprints)
-                hidden.update(i for i, value in enumerate(similarities) if value >= self.near_duplicate_threshold)
-        cached = frozenset(hidden)
-        self._hidden[task.task_id] = cached
-        return cached
+                similarity = np.array(DataStructs.BulkTanimotoSimilarity(fingerprint, self._fingerprints))
+                mask |= similarity >= self.rules.near_duplicate_threshold
+        self._hidden[(task.task_id, task.split)] = mask
+        return mask
 
     def search(
         self,
         *,
-        task_id: str,
+        task: RetroTask | None = None,
         product_smiles: str | None = None,
         reaction_class: str | None = None,
         limit: int = 10,
-        task: RetroTask | None = None,
     ) -> dict[str, Any]:
         limit = max(1, min(int(limit), 20))
-        query_fp = None
-        canonical_product = None
-        if product_smiles:
-            canonical_product = canonicalize_smiles(product_smiles)
-            query_fp = self._generator.GetFingerprint(Chem.MolFromSmiles(canonical_product))
+        canonical_product = canonicalize_smiles(product_smiles) if product_smiles else None
+        if not self.records:
+            similarity = np.zeros(0)
+        elif canonical_product:
+            fingerprint = self._generator.GetFingerprint(Chem.MolFromSmiles(canonical_product))
+            similarity = np.array(DataStructs.BulkTanimotoSimilarity(fingerprint, self._fingerprints))
+        else:
+            similarity = np.zeros(len(self.records))
+        allowed = ~self.hidden(task) if task is not None else np.ones(len(self.records), dtype=bool)
         normalized_class = _normalize_class(reaction_class)
-        hidden = self.hidden(task) if task is not None else frozenset()
-        ranked: list[tuple[float, str, Precedent]] = []
-        for index, (record, fingerprint) in enumerate(zip(self.records, self._fingerprints)):
-            if record.task_id == task_id or index in hidden:
-                continue
-            if normalized_class and _normalize_class(record.reaction_class) != normalized_class:
-                continue
-            similarity = DataStructs.TanimotoSimilarity(query_fp, fingerprint) if query_fp else 0.0
-            ranked.append((similarity, record.reaction_id or "", record))
-        ranked.sort(key=lambda item: (-item[0], item[1], item[2].product))
-        results = []
-        for similarity, _, record in ranked[:limit]:
-            results.append(
-                {
-                    "product_smiles": record.product,
-                    "reactants": list(record.reactants),
-                    "reaction_class": record.reaction_class,
-                    "similarity": round(similarity, 6),
-                    "conditions": list(record.conditions)[:3],
-                    "literature": list(record.literature)[:3],
-                    "source": [
-                        {key: value for key, value in source.items() if key in {"name", "url", "publication_year"}}
-                        for source in record.source[:3]
-                    ],
-                }
-            )
+        if normalized_class:
+            allowed &= self._classes == normalized_class
+        candidates = np.flatnonzero(allowed)
+        order = candidates[np.lexsort((candidates, -similarity[candidates]))]
+        results = [
+            {
+                "product_smiles": self.records[i].product,
+                "reactants": list(self.records[i].reactants),
+                "reaction_class": self.records[i].reaction_class,
+                "similarity": round(float(similarity[i]), 6),
+                "reagents": list(self.records[i].reagents[:8]),
+                "patents": list(self.records[i].patents[:3]),
+            }
+            for i in order[:limit]
+        ]
         return {
-            "query": {
-                "product_smiles": canonical_product,
-                "reaction_class": reaction_class,
-            },
+            "query": {"product_smiles": canonical_product, "reaction_class": reaction_class},
             "results": results,
             "returned": len(results),
-            "truncated": len(ranked) > limit,
-            "visibility": "training-split precedents only",
+            "truncated": len(order) > limit,
+            "visibility": "train-visible corpus reactions only",
         }
 
 
@@ -183,13 +143,20 @@ class StockIndex:
     def __init__(self, stock: Iterable[str]):
         self.smiles = tuple(sorted({canonicalize_smiles(item) for item in stock}))
         self.molecules = tuple(Chem.MolFromSmiles(item) for item in self.smiles)
-        self.inchikeys = tuple(Chem.MolToInchiKey(molecule) for molecule in self.molecules)
-        self._by_inchikey = dict(zip(self.inchikeys, self.smiles))
-        self._by_smiles = dict(zip(self.smiles, self.inchikeys))
+        self._known = frozenset(self.smiles)
+        self._by_inchikey: dict[str, str] | None = None  # built on the first InChIKey query; InChI is slow
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
         self._fingerprints = tuple(self._generator.GetFingerprint(molecule) for molecule in self.molecules)
 
-    def retrieve(self, query: str, *, mode: str = "auto", limit: int = 10) -> dict[str, Any]:
+    @staticmethod
+    @lru_cache(maxsize=100_000)
+    def inchikey(smiles: str) -> str:
+        return Chem.MolToInchiKey(Chem.MolFromSmiles(smiles))
+
+    def retrieve(
+        self, query: str, *, mode: str = "auto", limit: int = 10, excluded: frozenset[str] = frozenset()
+    ) -> dict[str, Any]:
+        """``excluded`` molecules are treated as absent from the stock (restricted-stock tasks)."""
         limit = max(1, min(int(limit), 20))
         query = str(query or "").strip()
         if not query:
@@ -201,17 +168,18 @@ class StockIndex:
         if mode == "auto":
             mode = "inchikey" if len(query) == 27 and query.count("-") == 2 else "exact"
 
-        matches: list[tuple[float, str, str]] = []
+        matches: list[tuple[float, str]] = []
         try:
             if mode == "exact":
                 canonical = canonicalize_smiles(query)
-                inchikey = self._by_smiles.get(canonical)
-                if inchikey:
-                    matches = [(1.0, canonical, inchikey)]
+                if canonical in self._known:
+                    matches = [(1.0, canonical)]
             elif mode == "inchikey":
+                if self._by_inchikey is None:
+                    self._by_inchikey = {self.inchikey(smiles): smiles for smiles in self.smiles}
                 smiles = self._by_inchikey.get(query.upper())
                 if smiles:
-                    matches = [(1.0, smiles, query.upper())]
+                    matches = [(1.0, smiles)]
             elif mode in {"class", "substructure"}:
                 smarts = CLASS_SMARTS.get(query.lower().replace(" ", "_")) if mode == "class" else query
                 if not smarts:
@@ -219,26 +187,20 @@ class StockIndex:
                 pattern = Chem.MolFromSmarts(smarts)
                 if pattern is None:
                     raise ValueError("invalid SMARTS query")
-                matches = [
-                    (1.0, smiles, inchikey)
-                    for smiles, inchikey, molecule in zip(self.smiles, self.inchikeys, self.molecules)
-                    if molecule.HasSubstructMatch(pattern)
-                ]
+                matches = [(1.0, s) for s, molecule in zip(self.smiles, self.molecules) if molecule.HasSubstructMatch(pattern)]
             elif mode == "similarity":
-                molecule = Chem.MolFromSmiles(canonicalize_smiles(query))
-                query_fp = self._generator.GetFingerprint(molecule)
-                matches = [
-                    (DataStructs.TanimotoSimilarity(query_fp, fingerprint), smiles, inchikey)
-                    for smiles, inchikey, fingerprint in zip(self.smiles, self.inchikeys, self._fingerprints)
-                ]
-                matches.sort(key=lambda item: (-item[0], item[1]))
+                query_fp = self._generator.GetFingerprint(Chem.MolFromSmiles(canonicalize_smiles(query)))
+                values = DataStructs.BulkTanimotoSimilarity(query_fp, self._fingerprints)
+                matches = sorted(zip(values, self.smiles), key=lambda item: (-item[0], item[1]))
             else:
                 raise ValueError("mode must be auto, exact, inchikey, class, substructure, or similarity")
         except Exception as exc:
             return {"mode": mode, "query": query, "results": [], "error": str(exc)}
+        if excluded:
+            matches = [match for match in matches if match[1] not in excluded]
         rendered = [
-            {"smiles": smiles, "inchikey": inchikey, "similarity": round(score, 6)}
-            for score, smiles, inchikey in matches[:limit]
+            {"smiles": smiles, "inchikey": self.inchikey(smiles), "similarity": round(score, 6)}
+            for score, smiles in matches[:limit]
         ]
         return {
             "mode": mode,

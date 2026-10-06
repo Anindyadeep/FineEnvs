@@ -5,23 +5,12 @@ from __future__ import annotations
 import json
 import os
 import threading
-from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
-from .environment import RetroRouteSession
-from .retrieval import PrecedentIndex
-from .store import TaskStore
-from .taskgen import split_rules
+from .benchmark import load_benchmark
 
 _TRACE_LOCK = threading.Lock()
-
-
-@lru_cache(maxsize=8)
-def _resources(tasks_dir: str, stocks_dir: str) -> tuple[TaskStore, PrecedentIndex]:
-    store = TaskStore(tasks_dir, stocks_dir)
-    training_tasks = store.tasks("train") if "train" in store.splits() else ()
-    return store, PrecedentIndex(training_tasks, **split_rules(tasks_dir))
 
 
 class RetroRouteTrainingEnv:
@@ -34,19 +23,18 @@ class RetroRouteTrainingEnv:
 
     def __init__(
         self,
-        tasks_dir: str | Path | None = None,
-        stocks_dir: str | Path | None = None,
+        benchmark_dir: str | Path | None = None,
         *,
         max_tool_calls: int | None = None,
         trace_path: str | Path | None = None,
     ):
-        root = Path(__file__).resolve().parents[2]
-        task_path = str(tasks_dir or os.getenv("RETROENV_TASKS_DIR", root / "sample/tasks-private"))
-        stock_path = str(stocks_dir or os.getenv("RETROENV_STOCKS_DIR", root / "sample/stocks"))
-        self.store, precedent_index = _resources(task_path, stock_path)
-        self.session = RetroRouteSession(
+        root = benchmark_dir or os.getenv("RETROENV_BENCHMARK_DIR")
+        if not root:
+            raise ValueError("pass benchmark_dir or set RETROENV_BENCHMARK_DIR to a built release directory")
+        benchmark = load_benchmark(str(Path(root).resolve()))
+        self.store = benchmark.store
+        self.session = benchmark.session(
             max_tool_calls=max_tool_calls or int(os.getenv("RETROENV_MAX_TOOL_CALLS", "32")),
-            precedent_index=precedent_index,
         )
         self.trace_path = (
             Path(trace_path or os.getenv("RETROENV_TRACE_PATH", ""))
@@ -102,22 +90,12 @@ class RetroRouteTrainingEnv:
             limit=limit,
         )
 
-    def validate_disconnection(
-        self,
-        product_smiles: str,
-        reactants: list[str],
-        reaction_class: str = "",
-    ) -> list[dict[str, str]]:
-        """Validate one agent-supplied retrosynthetic cut."""
-        return self._call(
-            "validate_disconnection",
-            product_smiles=product_smiles,
-            reactants=reactants,
-            reaction_class=reaction_class or None,
-        )
+    def validate_disconnection(self, product_smiles: str, reactants: list[str]) -> list[dict[str, str]]:
+        """Check one proposed cut against train-visible reactions and frequent templates."""
+        return self._call("validate_disconnection", product_smiles=product_smiles, reactants=reactants)
 
     def reaction_class_lookup(self, product_smiles: str, reactants: list[str]) -> list[dict[str, str]]:
-        """Name the class of a supported, supplied cut."""
+        """Name the reaction class of a proposed cut with the verifier's labeller."""
         return self._call(
             "reaction_class_lookup",
             product_smiles=product_smiles,
@@ -131,7 +109,7 @@ class RetroRouteTrainingEnv:
         reaction_class: str = "",
         limit: int = 5,
     ) -> list[dict[str, str]]:
-        """Return frozen reported conditions for a cut or analogue."""
+        """Return reagent sets reported for train-visible analogues."""
         return self._call(
             "reaction_conditions_search",
             product_smiles=product_smiles,
