@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).parents[1]
+FIXTURE = ROOT / "tests" / "fixtures" / "mini-release"
 _SPEC = importlib.util.spec_from_file_location("retroenv_prepare", ROOT / "envs/retro_route/openenv/prepare.py")
 assert _SPEC and _SPEC.loader
 prepare = importlib.util.module_from_spec(_SPEC)
@@ -22,8 +23,9 @@ def _fake_hub(monkeypatch, root: Path) -> list[dict]:
     def snapshot_download(repo_id, *, repo_type, revision, local_dir, allow_patterns, token):
         calls.append({"repo": repo_id, "revision": revision, "patterns": allow_patterns, "token": token})
         prefix = allow_patterns[0].split("tasks-private")[0]
-        for name in ("tasks-private", "stocks"):
+        for name in ("tasks-private", "stocks", "library"):
             shutil.copytree(root / name, Path(local_dir) / prefix / name)
+        shutil.copy(root / "checksums.json", Path(local_dir) / prefix / "checksums.json")
         return str(local_dir)
 
     monkeypatch.setitem(sys.modules, "huggingface_hub", types.SimpleNamespace(snapshot_download=snapshot_download))
@@ -31,7 +33,7 @@ def _fake_hub(monkeypatch, root: Path) -> list[dict]:
 
 
 def test_a_public_repo_downloads_without_a_token_and_prints_its_directory(tmp_path, monkeypatch, capsys):
-    calls = _fake_hub(monkeypatch, ROOT / "sample")
+    calls = _fake_hub(monkeypatch, FIXTURE)
     monkeypatch.delenv("RETROENV_BENCHMARK_DIR", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.setenv("RETROENV_TASKS_REPO", "AdithyaSK/RetroEnv-RL@main")
@@ -43,13 +45,13 @@ def test_a_public_repo_downloads_without_a_token_and_prints_its_directory(tmp_pa
             "repo": "AdithyaSK/RetroEnv-RL",
             "revision": "main",
             "token": None,
-            "patterns": ["tasks-private/*", "stocks/*", "checksums.json", "manifest.json"],
+            "patterns": ["tasks-private/*", "stocks/*", "library/*", "checksums.json", "manifest.json"],
         }
     ]
 
 
 def test_a_subdirectory_serves_another_benchmark_from_the_same_repo(tmp_path, monkeypatch, capsys):
-    calls = _fake_hub(monkeypatch, ROOT / "sample")
+    calls = _fake_hub(monkeypatch, FIXTURE)
     monkeypatch.delenv("RETROENV_BENCHMARK_DIR", raising=False)
     monkeypatch.setenv("RETROENV_TASKS_REPO", "AdithyaSK/RetroEnv-RL")
     monkeypatch.setenv("RETROENV_TASKS_SUBDIR", "retroeval-v2")
