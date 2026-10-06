@@ -1,39 +1,25 @@
 # RetroEnv explorer
 
-A local browser for everything RetroEnv has on disk: benchmark tasks, SFT datasets
-and model runs.
+A local browser for a built RetroEnv release: the environment, every task, its hidden
+known routes, and live play through the real session.
 
 ```bash
-hf download AdithyaSK/RetroEnv-RL --repo-type dataset --local-dir benchmark/retroeval-v3 \
-  --exclude "retroeval-v2/*" "runs/*" "media/*"                     # the RL tasks
-hf download AdithyaSK/RetroEnv-SFT --repo-type dataset --local-dir .local/sft  # the SFT exports
-uv run --extra eval python explorer/server.py     # then open http://127.0.0.1:8050
+uv run python -m dataset.build_release                 # once: writes data/release/RetroEnv-RL
+uv run python explorer/server.py                        # then open http://127.0.0.1:8050
+uv run python explorer/server.py --release tests/fixtures/mini-release   # the small test release
 ```
-
-Model runs are read from `runs/`; the v2 board's are in the RL dataset under `runs/v2-eval/`.
 
 | View | What it shows |
 |---|---|
-| Environment | The RL side: tasks per split and what each split is for, what one episode looks like, the chosen split's step budget, first reaction, tier and target size (click a bar to list those tasks), the 9 tools and the reward components |
-| RL tasks | Every task, filterable by split, steps, first reaction, tier, size, route count and SFT coverage, or searched by ID or SMILES; for benchmarks with model runs, how many models passed each one |
-| Task | What the policy sees (target, budgets, exact prompt), the answer key the verifier grades against, drawn as a tree, a **Try it** panel, and every model-run episode and SFT row on the task, turn by turn |
-| SFT data | The SFT exports side by side (recovery rate, exactness, tool use, tokens) and a browser over their rows |
-| Model runs | The evaluation runs under `runs/` and their episodes |
+| Environment | Tasks per split and what each split is for, one episode, the chosen split's shortest-route depth, variants, first reaction, tier and target size (click a bar to list those tasks), the tools and the reward components |
+| RL tasks | Every task, filterable by split, variant, shortest route, first reaction, tier and size, or searched by ID or SMILES |
+| Task | What the policy sees (target, depth budget, constraints, exact prompt), the known patent and witness routes as a pan-and-zoom route graph, and a **Try it** panel |
 
 **Try it** plays the task through the same core session the server runs. Call any tool
 with JSON arguments, validate the candidate cuts the rule library proposes, submit the
-answer key or an empty route, and see the reward split into its components. The first
-episode on a benchmark builds its precedent index, which takes about 30 seconds for v3.
+known routes or an empty route, and see the reward split into its components. The first
+episode loads the release's reaction library and precedent index (about a minute).
 
-The server finds its data itself:
-
-- benchmarks: every `benchmark/*/tasks-private`, with its difficulty sidecar and stock
-- SFT datasets: every export under `.local/sft/`
-- runs: everything under `runs/` except `runs/sft`, whose generation runs hold tens of thousands of files; their exports are the datasets
-
-It indexes each SFT file once, by byte offset, and caches the index in
-`.local/explorer-cache`; a row is read only when you open it. Molecules are drawn by
-RDKit on the server and follow the page's light or dark theme.
-
-Dev, eval and stress tasks hide their reference until you choose to show it, so the
-default view is what a model sees. The server listens on localhost only.
+Held-out tasks (dev, test_id, test_hard) hide their known routes until you choose to show
+them, so the default view is what a model sees. Molecules are drawn by RDKit on the server
+and follow the page's light or dark theme. The server listens on localhost only.

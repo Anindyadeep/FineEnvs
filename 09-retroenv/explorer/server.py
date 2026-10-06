@@ -1,31 +1,27 @@
 #!/usr/bin/env python3
-"""Local explorer for RetroEnv: benchmark tasks, SFT datasets and model runs.
+"""Local explorer for RetroEnv releases: the environment, every task, its known routes, eval runs, and live play.
 
-    uv run --extra eval python explorer/server.py            # http://127.0.0.1:8050
+    uv run python explorer/server.py                                   # http://127.0.0.1:8050
+    uv run python explorer/server.py --release tests/fixtures/mini-release
 
-It reads the files in place: every ``benchmark/*/tasks-private`` set (with its
-difficulty sidecar and stock), every SFT export under ``.local/sft/``, and the
-model runs under ``runs/`` (the multi-gigabyte SFT generation runs under
-``runs/sft`` are skipped; their exports are the datasets). SFT files are indexed
-once by byte offset and the index is cached in ``.local/explorer-cache``, so later
-starts are fast and a row is read only when it is opened.
-
-References of dev, eval and stress tasks are sent only when the page asks with
-``reveal=1``, so the default view shows what a model sees. It binds to localhost.
+It reads release directories in place (every ``data/release/*`` with ``tasks-private/``,
+or the ones given with ``--release``) and eval runs under ``runs/`` (``--runs``), live
+while they are still being written. Known routes of held-out tasks are sent only
+when the page asks with ``reveal=1``, so the default view shows what a model sees.
+Live play loads the release's reaction library on first use. It binds to localhost.
 """
 
 from __future__ import annotations
 
 import argparse
-import hashlib
-import importlib.util
 import json
+import re
 import socket
 import sys
 import threading
 import time
 import uuid
-from collections import Counter, defaultdict
+from collections import Counter
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -37,39 +33,54 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
+from retroenv.benchmark import load_benchmark
 from retroenv.chemistry import canonicalize_smiles
+from retroenv.classes import CONSTRAINABLE_CLASSES
 from retroenv.disconnections import describe, reaction_phrase, step_family, strategic_disconnections
-from retroenv.environment import PROMPT, RetroRouteSession
-from retroenv.graph import routes_to_submission
+from retroenv.environment import RetroRouteSession, task_prompt
 from retroenv.models import RetroTask
-from retroenv.retrieval import PrecedentIndex
 from retroenv.store import load_stock
-from retroenv.taskgen import split_rules
-from retroenv.tools import ORACLE_TOOLS, TOOLS, openai_tools
-from retroenv.verifier import GRAPH_WEIGHTS
+from retroenv.tools import ASSIST_TOOLS, TOOLS, openai_tools
+from retroenv.verifier import WEIGHTS, known_routes_submission
 
 ROOT = Path(__file__).resolve().parents[1]
 STATIC = Path(__file__).resolve().parent / "static"
-CACHE = ROOT / ".local" / "explorer-cache"
-HELD_OUT = ("dev", "eval", "stress")
-SPLITS = ("train", "dev", "eval", "stress")
-
-_spec = importlib.util.spec_from_file_location("build_sft", ROOT / "dataset" / "build_sft.py")
-build_sft = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(build_sft)
+SPLITS = ("train", "dev", "test_id", "test_hard")
+HELD_OUT = ("dev", "test_id", "test_hard")
+# A run without a final summary counts as live while its files changed this recently.
+LIVE_WINDOW_S = 20 * 60
 
 
 def size_bin(heavy: int) -> str:
     return "<=20" if heavy <= 20 else "21-30" if heavy <= 30 else "31-40" if heavy <= 40 else "41+"
 
 
-# --- benchmarks -------------------------------------------------------------------
+def first_class(task: dict[str, Any]) -> str:
+    for route in task["reference_routes"]:
+        for step in route["steps"]:
+            if step["product"] == task["target_smiles"]:
+                return step.get("reaction_class") or "other"
+    return "other"
 
 
-class Benchmark:
+def constraint_text(task: dict[str, Any]) -> str:
+    c = task["constraints"]
+    if c["forbidden_classes"]:
+        return "no " + ", ".join(c["forbidden_classes"])
+    if c["excluded_stock"]:
+        return f"{len(c['excluded_stock'])} building block unavailable"
+    if task["variant"] == "max_depth":
+        return f"depth at most {task['max_depth']}"
+    if task["min_routes"] > 1:
+        return f"{task['min_routes']} distinct routes"
+    return ""
+
+
+class Release:
     def __init__(self, root: Path):
         self.name = root.name
         self.root = root
+        self.manifest = json.loads((root / "manifest.json").read_text()) if (root / "manifest.json").exists() else {}
         self.tasks: dict[str, dict[str, Any]] = {}
         for split in SPLITS:
             path = root / "tasks-private" / f"{split}.jsonl"
@@ -77,304 +88,117 @@ class Benchmark:
                 for line in path.open(encoding="utf-8"):
                     task = json.loads(line)
                     self.tasks[task["task_id"]] = task
-        sidecar = root / "difficulty.jsonl"
-        self.difficulty = {}
-        if sidecar.exists():
-            self.difficulty = {row["task_id"]: row for row in map(json.loads, sidecar.open(encoding="utf-8"))}
-        self.stock_id = next(iter(self.tasks.values()))["stock_id"] if self.tasks else None
+        self.rows = sorted((self._row(t) for t in self.tasks.values()), key=lambda r: (SPLITS.index(r["split"]), r["id"]))
         self._stock: frozenset[str] | None = None
-        self.rows = [self._row(task) for task in self.tasks.values()]
-        self.rows.sort(key=lambda r: (SPLITS.index(r["split"]), r["id"]))
+        self._stock_lock = threading.Lock()
 
     @property
     def stock(self) -> frozenset[str]:
-        if self._stock is None:
-            self._stock = frozenset(
-                canonicalize_smiles(s) for s in load_stock(self.root / "stocks" / f"{self.stock_id}.smi")
-            )
+        # Canonicalizing a full stock takes about a minute; concurrent requests must wait for one load.
+        with self._stock_lock:
+            if self._stock is None:
+                stock_id = next(iter(self.tasks.values()))["stock_id"]
+                self._stock = load_stock(self.root / "stocks" / f"{stock_id}.smi")
         return self._stock
 
-    def _row(self, task: dict[str, Any]) -> dict[str, Any]:
-        diff = self.difficulty.get(task["task_id"], {})
-        first = task["reference_routes"][0]["steps"][0]
-        heavy = task["difficulty"].get("heavy_atoms") or diff.get("heavy_atoms") or 0
+    @staticmethod
+    def _row(task: dict[str, Any]) -> dict[str, Any]:
+        d = task.get("difficulty", {})
+        heavy = d.get("heavy_atoms", 0)
         return {
             "id": task["task_id"],
+            "parent": task["parent_id"],
             "split": task["split"],
+            "variant": task["variant"],
             "smiles": task["target_smiles"],
-            "steps": task["max_steps"],
+            "min_depth": d.get("constrained_min_depth") or d.get("min_depth"),
+            "max_depth": task["max_depth"],
             "routes": task["min_routes"],
             "heavy": heavy,
             "size": size_bin(heavy),
-            "family": (diff.get("first_step_families") or [step_family(first["reactants"], first["product"])])[0],
-            "tier": diff.get("tier"),
-            "nn": diff.get("nn_train_similarity"),
-            "stereo": bool(task["difficulty"].get("stereochemistry")),
+            "family": first_class(task),
+            "tier": d.get("tier"),
+            "nn": d.get("nn_similarity"),
+            "stereo": d.get("stereocentres", 0) > 0,
+            "convergent": bool(d.get("convergent")),
+            "constraint": constraint_text(task),
         }
 
 
-def discover_benchmarks() -> dict[str, Benchmark]:
+def discover(paths: list[Path]) -> dict[str, Release]:
+    roots = paths or sorted(p.parent for p in (ROOT / "data" / "release").glob("*/tasks-private"))
     found = {}
-    for path in sorted((ROOT / "benchmark").glob("*/tasks-private")):
-        print(f"loading {path.parent.name} ...", file=sys.stderr)
-        found[path.parent.name] = Benchmark(path.parent)
+    for root in roots:
+        print(f"loading {root} ...", file=sys.stderr)
+        found[root.name] = Release(root)
     return found
 
-
-# --- SFT datasets ---------------------------------------------------------------------
-
-
-class Dataset:
-    """An SFT export, indexed by byte offset so rows are read only when opened."""
-
-    def __init__(self, root: Path):
-        self.name = root.name
-        self.root = root
-        self.manifest = json.loads((root / "manifest.json").read_text()) if (root / "manifest.json").exists() else {}
-        self.files = [root / f"{part}.jsonl" for part in ("train", "validation") if (root / f"{part}.jsonl").exists()]
-        stamp = hashlib.sha256(
-            json.dumps([(str(f), f.stat().st_size, f.stat().st_mtime) for f in self.files]).encode()
-        ).hexdigest()[:16]
-        cache = CACHE / f"{self.name}.{stamp}.json"
-        if cache.exists():
-            self.rows = json.loads(cache.read_text())
-        else:
-            print(f"indexing {self.name} (once) ...", file=sys.stderr)
-            self.rows = self._index()
-            CACHE.mkdir(parents=True, exist_ok=True)
-            cache.write_text(json.dumps(self.rows))
-        self.by_task: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        self.by_id = {}
-        for row in self.rows:
-            self.by_task[row["task_id"]].append(row)
-            self.by_id[row["id"]] = row
-
-    def _index(self) -> list[dict[str, Any]]:
-        rows = []
-        for part, path in zip(("train", "validation"), self.files):
-            with path.open("rb") as handle:
-                offset = 0
-                for line in handle:
-                    row = json.loads(line)
-                    names, rejected, turns = {}, False, 0
-                    for message in row["messages"]:
-                        for call in message.get("tool_calls") or []:
-                            names[call["id"]] = call["function"]["name"]
-                        if message["role"] == "assistant":
-                            turns += 1
-                        elif (
-                            message["role"] == "tool"
-                            and names.get(message.get("tool_call_id")) == "validate_disconnection"
-                        ):
-                            rejected = rejected or not json.loads(message["content"]).get("valid", True)
-                    rows.append(
-                        {
-                            "id": row["id"],
-                            "task_id": row["task_id"],
-                            "part": part,
-                            "file": path.name,
-                            "offset": offset,
-                            "length": len(line),
-                            "source": row["source"],
-                            "steps": row["max_steps"],
-                            "reward": row["reward"],
-                            "exact": row["exact_match"],
-                            "calls": row["tool_calls"],
-                            "turns": turns,
-                            "recovered": rejected,
-                            "tools": sorted(set(names.values())),
-                        }
-                    )
-                    offset += len(line)
-        return rows
-
-    def read(self, row_id: str) -> dict[str, Any]:
-        meta = self.by_id[row_id]
-        with (self.root / meta["file"]).open("rb") as handle:
-            handle.seek(meta["offset"])
-            return json.loads(handle.read(meta["length"]))
-
-
-def discover_datasets() -> dict[str, Dataset]:
-    found = {}
-    for path in sorted((ROOT / ".local" / "sft").glob("*/manifest.json")):
-        found[path.parent.name] = Dataset(path.parent)
-    return found
-
-
-# --- model runs ---------------------------------------------------------------------------
-
-
-class Run:
-    def __init__(self, root: Path, benchmarks: dict[str, Benchmark]):
-        self.root = root
-        self.name = str(root.relative_to(ROOT / "runs"))
-        self.identity = json.loads((root / "identity.json").read_text())
-        ids = set(self.identity.get("task_ids", []))
-        self.benchmark = next((name for name, b in benchmarks.items() if ids and ids <= b.tasks.keys()), None)
-        self._episodes: list[dict[str, Any]] | None = None
-
-    @property
-    def episodes(self) -> list[dict[str, Any]]:
-        if self._episodes is None:
-            rows = []
-            for path in sorted((self.root / "episodes").glob("*.json")):
-                row = json.loads(path.read_text())
-                rows.append(
-                    {
-                        "file": path.name,
-                        "task_id": row["task_id"],
-                        "attempt": row.get("attempt", 0),
-                        "reward": row.get("reward"),
-                        "valid": row.get("valid"),
-                        "exact": row.get("exact_match"),
-                        "calls": row.get("tool_calls"),
-                        "turns": row.get("turns"),
-                        "refused": any(str(e).startswith("refusal") for e in row.get("errors", [])),
-                    }
-                )
-            self._episodes = rows
-        return self._episodes
-
-    def summary(self) -> dict[str, Any]:
-        summary = json.loads((self.root / "summary.json").read_text()) if (self.root / "summary.json").exists() else {}
-        return {
-            "name": self.name,
-            "label": self.identity.get("label"),
-            "provider": self.identity.get("provider"),
-            "split": self.identity.get("split"),
-            "benchmark": self.benchmark,
-            "toolset": self.identity.get("toolset"),
-            "tasks": len(self.identity.get("task_ids", [])),
-            "pass": summary.get("pass_at_1"),
-            "exact": summary.get("exact_route_rate"),
-            "reward": summary.get("mean_reward"),
-            "cost": summary.get("cost_usd"),
-        }
-
-
-def model_passes(benchmark: str) -> dict[str, list[int]]:
-    """task ID -> [episodes that passed, episodes] across the model runs on this benchmark."""
-    cache = STATE.setdefault("passes", {})
-    if benchmark not in cache:
-        tally: dict[str, list[int]] = defaultdict(lambda: [0, 0])
-        for run in STATE["runs"].values():
-            if run.benchmark == benchmark and run.identity.get("provider") != "reference":
-                for episode in run.episodes:
-                    tally[episode["task_id"]][0] += bool(episode["valid"])
-                    tally[episode["task_id"]][1] += 1
-        cache[benchmark] = dict(tally)
-    return cache[benchmark]
-
-
-def discover_runs(benchmarks: dict[str, Benchmark]) -> dict[str, Run]:
-    found = {}
-    for identity in sorted((ROOT / "runs").glob("**/identity.json")):
-        if "runs/sft" in str(identity):
-            continue  # generation runs: tens of thousands of files; their exports are the datasets
-        run = Run(identity.parent, benchmarks)
-        found[run.name] = run
-    return found
-
-
-# --- the app ---------------------------------------------------------------------------------
 
 app = FastAPI(title="RetroEnv explorer")
 STATE: dict[str, Any] = {}
 
 
-def bench(name: str) -> Benchmark:
+def release(name: str) -> Release:
     try:
-        return STATE["benchmarks"][name]
+        return STATE["releases"][name]
     except KeyError:
-        raise HTTPException(404, f"unknown benchmark {name!r}") from None
+        raise HTTPException(404, f"unknown release {name!r}") from None
 
 
 @app.get("/api/meta")
 def meta() -> dict[str, Any]:
     return {
         "benchmarks": [
-            {"name": n, "splits": dict(Counter(r["split"] for r in b.rows))} for n, b in STATE["benchmarks"].items()
+            {"name": n, "splits": dict(Counter(r["split"] for r in b.rows)), "manifest": {k: b.manifest.get(k) for k in ("source", "stock", "library")}}
+            for n, b in STATE["releases"].items()
         ],
-        "datasets": [{"name": n, "rows": len(d.rows), "tasks": len(d.by_task)} for n, d in STATE["datasets"].items()],
-        "runs": [r.summary() for r in STATE["runs"].values()],
         "tools": [
-            {
-                "name": t["function"]["name"],
-                "description": t["function"]["description"],
-                "oracle": t["function"]["name"] in ORACLE_TOOLS,
-            }
+            {"name": t["function"]["name"], "description": t["function"]["description"], "assist": t["function"]["name"] in ASSIST_TOOLS}
             for t in TOOLS
         ],
-        "weights": GRAPH_WEIGHTS,
+        "weights": WEIGHTS,
+        "constrainable": list(CONSTRAINABLE_CLASSES),
+        "split_use": next(iter(STATE["releases"].values())).manifest.get("design", {}).get("split_use", {}),
     }
 
 
 @app.get("/api/overview")
-def overview(benchmark: str, dataset: str | None = None) -> dict[str, Any]:
-    b = bench(benchmark)
+def overview(benchmark: str) -> dict[str, Any]:
+    b = release(benchmark)
     out: dict[str, Any] = {"splits": {}}
     for split in SPLITS:
         rows = [r for r in b.rows if r["split"] == split]
         if not rows:
             continue
+        standard = [r for r in rows if r["variant"] == "standard"]
         out["splits"][split] = {
             "tasks": len(rows),
-            "two_route": sum(r["routes"] >= 2 for r in rows),
-            "stereo": sum(r["stereo"] for r in rows),
-            **{key: dict(Counter(str(r[key]) for r in rows)) for key in ("steps", "family", "tier", "size")},
+            "parents": len(standard),
+            "variant": dict(Counter(r["variant"] for r in rows)),
+            "min_depth": dict(Counter(str(r["min_depth"]) for r in standard)),
+            "tier": dict(Counter(str(r["tier"]) for r in standard)),
+            "family": dict(Counter(r["family"] for r in standard)),
+            "size": dict(Counter(r["size"] for r in standard)),
+            "convergent": sum(r["convergent"] for r in standard),
+            "stereo": sum(r["stereo"] for r in standard),
         }
-    d = STATE["datasets"].get(dataset or "")
-    if d:
-        rows = d.rows
-        out["dataset"] = {
-            "name": d.name,
-            "rows": len(rows),
-            "tasks": len(d.by_task),
-            "manifest": d.manifest,
-            "recovered": sum(r["recovered"] for r in rows) / len(rows),
-            "steps": dict(Counter(str(r["steps"]) for r in rows)),
-            "turns": dict(Counter(str(min(r["turns"], 12)) for r in rows)),
-            "calls": dict(Counter(str(min(r["calls"] // 2 * 2, 30)) for r in rows)),
-            "recovered_by_steps": {
-                s: sum(r["recovered"] for r in rows if str(r["steps"]) == s)
-                / max(1, sum(str(r["steps"]) == s for r in rows))
-                for s in sorted({str(r["steps"]) for r in rows})
-            },
-            "tools": dict(Counter(t for r in rows for t in r["tools"])),
-        }
-    out["datasets"] = {
-        name: {
-            "rows": len(x.rows),
-            "recovered": sum(r["recovered"] for r in x.rows) / max(1, len(x.rows)),
-            "exact": x.manifest.get("exact_route_rate"),
-            "calls": x.manifest.get("mean_tool_calls"),
-            "tokens": x.manifest.get("tokens"),
-            "behaviour": x.manifest.get("behaviour"),
-            "steps": x.manifest.get("by_max_steps"),
-        }
-        for name, x in STATE["datasets"].items()
-    }
     return out
 
 
 @app.get("/api/tasks")
 def tasks(
     benchmark: str,
-    dataset: str | None = None,
     split: str = "",
-    steps: str = "",
+    variant: str = "",
+    min_depth: str = "",
     family: str = "",
     tier: str = "",
     size: str = "",
-    routes: str = "",
-    sft: str = "",
     q: str = "",
     offset: int = 0,
     limit: int = Query(50, le=200),
 ) -> dict[str, Any]:
-    b = bench(benchmark)
-    d = STATE["datasets"].get(dataset or "")
+    b = release(benchmark)
     needle = q.strip()
     canonical = None
     if needle and not needle.startswith("retro_"):
@@ -382,89 +206,70 @@ def tasks(
             canonical = canonicalize_smiles(needle)
         except Exception:
             canonical = None
-    out = []
-    for row in b.rows:
-        if (
-            split
-            and row["split"] != split
-            or steps
-            and str(row["steps"]) != steps
-            or family
-            and row["family"] != family
-        ):
-            continue
-        if tier and row["tier"] != tier or size and row["size"] != size or routes and str(row["routes"]) != routes:
-            continue
-        if needle and needle not in row["id"] and needle not in row["smiles"] and row["smiles"] != canonical:
-            continue
-        sft_rows = d.by_task.get(row["id"], []) if d else []
-        if (
-            sft == "has"
-            and not sft_rows
-            or sft == "recovered"
-            and not any(r["recovered"] for r in sft_rows)
-            or sft == "none"
-            and sft_rows
-        ):
-            continue
-        out.append({**row, "sft": len(sft_rows), "recovered": any(r["recovered"] for r in sft_rows)})
-    passes = model_passes(benchmark)
-    page = [{**row, "models": passes.get(row["id"])} for row in out[offset : offset + limit]]
-    return {"total": len(out), "rows": page, "has_models": bool(passes)}
-
-
-@app.get("/api/sft_rows")
-def sft_rows(
-    dataset: str,
-    steps: str = "",
-    recovered: str = "",
-    tool: str = "",
-    q: str = "",
-    offset: int = 0,
-    limit: int = Query(50, le=200),
-) -> dict[str, Any]:
-    d = STATE["datasets"].get(dataset)
-    if not d:
-        raise HTTPException(404, f"no dataset {dataset}")
-    rows = [
-        r
-        for r in d.rows
-        if (not steps or str(r["steps"]) == steps)
-        and (not recovered or r["recovered"] == (recovered == "yes"))
-        and (not tool or tool in r["tools"])
-        and (not q or q in r["id"])
+    filters = {"split": split, "variant": variant, "min_depth": min_depth, "family": family, "tier": tier, "size": size}
+    out = [
+        row
+        for row in b.rows
+        if all(not value or str(row[key]) == value for key, value in filters.items())
+        and (not needle or needle in row["id"] or needle in row["smiles"] or row["smiles"] == canonical)
     ]
-    return {"total": len(rows), "rows": rows[offset : offset + limit]}
+    return {"total": len(out), "rows": out[offset : offset + limit]}
 
 
 @app.get("/api/disconnections")
 def disconnections(smi: str) -> list[dict[str, Any]]:
-    """Rule-based candidate cuts, the same library the scripted chemist proposes from."""
+    """Rule-based candidate cuts of a molecule, to try in live play."""
     return [
-        {
-            "reactants": list(d.reactants),
-            "bond": d.bond,
-            "family": d.family,
-            "score": d.score,
-            "text": describe(d.family, d.reactants, smi),
-        }
+        {"reactants": list(d.reactants), "bond": d.bond, "family": d.family, "score": d.score, "text": describe(d.family, d.reactants, smi)}
         for d in strategic_disconnections(smi)[:8]
     ]
 
 
-# --- live sessions: play a task through the same core session the server uses -------------
+def _route(b: Release, route: dict[str, Any]) -> dict[str, Any]:
+    steps = []
+    for step in route["steps"]:
+        family = step_family(step["reactants"], step["product"])
+        steps.append(
+            {
+                "product": step["product"],
+                "reactants": step["reactants"],
+                "family": step.get("reaction_class") or family,
+                "phrase": reaction_phrase(family, step["reactants"], step["product"]),
+                "text": describe(family, step["reactants"], step["product"]),
+            }
+        )
+    molecules = {m for s in route["steps"] for m in [s["product"], *s["reactants"]]}
+    return {
+        "kind": route["kind"],
+        "steps": steps,
+        "patents": [s["patent"] for s in route.get("source", [])][:5],
+        "in_stock": {m: m in b.stock for m in molecules},
+    }
+
+
+@app.get("/api/task")
+def task(benchmark: str, id: str, reveal: int = 0) -> dict[str, Any]:
+    b = release(benchmark)
+    if id not in b.tasks:
+        raise HTTPException(404, f"no task {id}")
+    t = b.tasks[id]
+    hidden = t["split"] in HELD_OUT and not reveal
+    excluded = set(t["constraints"]["excluded_stock"])
+    return {
+        "row": next(r for r in b.rows if r["id"] == id),
+        "task": {k: v for k, v in t.items() if k not in {"reference_routes", "difficulty"}},
+        "prompt": task_prompt(RetroTask.from_dict(t)),
+        "difficulty": t.get("difficulty", {}),
+        "hidden": hidden,
+        "target_in_stock": t["target_smiles"] in b.stock and t["target_smiles"] not in excluded,
+        "routes": None if hidden else [_route(b, r) for r in t["reference_routes"]],
+        "siblings": [r["id"] for r in b.rows if r["parent"] == t["parent_id"] and r["id"] != id],
+    }
+
+
+# --- live play through the same core session the server runs ---------------------------
 
 SESSIONS: dict[str, dict[str, Any]] = {}
-_INDEXES: dict[str, PrecedentIndex] = {}
-_INDEX_LOCK = threading.Lock()
-
-
-def _precedents(b: Benchmark) -> PrecedentIndex:
-    with _INDEX_LOCK:
-        if b.name not in _INDEXES:
-            train = [RetroTask.from_dict(t) for t in b.tasks.values() if t["split"] == "train"]
-            _INDEXES[b.name] = PrecedentIndex(train, **split_rules(b.root / "tasks-private"))
-        return _INDEXES[b.name]
 
 
 class NewSession(BaseModel):
@@ -480,15 +285,16 @@ class ToolCall(BaseModel):
 
 @app.post("/api/session")
 def new_session(request: NewSession) -> dict[str, Any]:
-    b = bench(request.benchmark)
+    b = release(request.benchmark)
     if request.task not in b.tasks:
         raise HTTPException(404, f"no task {request.task}")
-    session = RetroRouteSession(precedent_index=_precedents(b), toolset=request.toolset)
+    core = load_benchmark(str(b.root.resolve()))
+    session = core.session(toolset=request.toolset)
     observation = session.reset(RetroTask.from_dict(b.tasks[request.task]), b.stock)
     for key in sorted(SESSIONS, key=lambda k: SESSIONS[k]["at"])[:-40]:
         del SESSIONS[key]  # keep the 40 most recent
     sid = uuid.uuid4().hex
-    SESSIONS[sid] = {"session": session, "benchmark": b, "task": request.task, "at": time.time()}
+    SESSIONS[sid] = {"session": session, "release": b, "task": request.task, "at": time.time()}
     return {"session": sid, "observation": observation, "tools": openai_tools(request.toolset)}
 
 
@@ -525,119 +331,242 @@ def session_call(sid: str, request: ToolCall) -> dict[str, Any]:
 
 @app.post("/api/session/{sid}/reference")
 def session_reference(sid: str, reveal: int = 0) -> dict[str, Any]:
-    """Submit the answer key, to see what a perfect episode scores (held-out tasks only after reveal)."""
+    """Submit the shortest compliant known routes, to see what a perfect episode scores."""
     entry = _session(sid)
-    task = entry["benchmark"].tasks[entry["task"]]
+    task = entry["release"].tasks[entry["task"]]
     if task["split"] in HELD_OUT and not reveal:
-        raise HTTPException(403, "reveal the reference first")
-    retro = RetroTask.from_dict(task)
-    submission = routes_to_submission(
-        retro.target_smiles, retro.reference_routes[: retro.max_routes], entry["session"].stock, source="answer key"
-    )
+        raise HTTPException(403, "reveal the known routes first")
+    submission = known_routes_submission(RetroTask.from_dict(task), entry["session"].stock)
     out = _outcome(entry["session"], "emit_routes", entry["session"].emit_routes(submission))
     return {**out, "arguments": {"submission": submission}}
 
 
-def _route(b: Benchmark, route: dict[str, Any]) -> dict[str, Any]:
-    steps = []
-    for step in route["steps"]:
-        family = step_family(step["reactants"], step["product"])
-        steps.append(
-            {
-                "product": step["product"],
-                "reactants": step["reactants"],
-                "family": family,
-                "phrase": reaction_phrase(family, step["reactants"], step["product"]),
-                "text": describe(family, step["reactants"], step["product"]),
-            }
-        )
-    molecules = {m for s in route["steps"] for m in [s["product"], *s["reactants"]]}
+# --- eval runs written by eval/run_eval.py: <runs>/<set>/<run>/{identity,progress,summary}.json, episodes/ ---
+
+
+def read_json(path: Path) -> Any:
+    return _read_json(path, path.stat().st_mtime_ns)
+
+
+@lru_cache(maxsize=256)
+def _read_json(path: Path, mtime_ns: int) -> Any:
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def failure_kind(text: str) -> str:
+    """Group a verifier failure across tasks: drop route numbers, tree paths, SMILES lists and counts."""
+    text = re.sub(r"^route \d+: ", "", text)
+    if text.startswith("routes["):
+        text = text.split(": ", 1)[-1]
+    return re.sub(r"\d+", "N", text.split(": [")[0].split(": '")[0])
+
+
+def failure_kinds(episode: dict[str, Any]) -> list[str]:
+    """Distinct causes, without the pass verdict that every failed episode carries."""
+    kinds = dict.fromkeys(failure_kind(f) for f in episode.get("hard_failures") or [])
+    return [k for k in kinds if not k.startswith("N valid route")]
+
+
+def headline_failure(episode: dict[str, Any]) -> str:
+    kinds = failure_kinds(episode)
+    if kinds:
+        return kinds[0]
+    return next((e for e in episode.get("errors") or [] if e.startswith("API")), "")
+
+
+def episode_row(path: Path) -> dict[str, Any]:
+    return _episode_row(path, path.stat().st_mtime_ns)
+
+
+@lru_cache(maxsize=8192)
+def _episode_row(path: Path, mtime_ns: int) -> dict[str, Any]:
+    e = json.loads(path.read_text(encoding="utf-8"))
+    usage = e.get("usage") or {}
     return {
-        "steps": steps,
-        "source": [{k: v for k, v in s.items() if k in ("group_id", "name")} for s in route.get("source", [])],
-        "in_stock": {m: canonicalize_smiles(m) in b.stock for m in molecules},
+        "task_id": e["task_id"],
+        "attempt": e.get("attempt", 0),
+        "smiles": e.get("target_smiles"),
+        "tier": e.get("tier"),
+        "max_depth": e.get("max_depth"),
+        "variant": e.get("variant"),
+        "graded": e.get("graded", True),
+        "reward": e.get("reward"),
+        "valid": bool(e.get("valid")),
+        "exact": bool(e.get("exact_match")),
+        "tool_calls": e.get("tool_calls"),
+        "turns": e.get("turns"),
+        "latency": usage.get("latency_seconds"),
+        "tokens": (usage.get("prompt_tokens") or 0) + (usage.get("completion_tokens") or 0),
+        "coerced": bool(e.get("submission_coerced")),
+        "auto_emitted": bool(e.get("auto_emitted")),
+        "failure": "" if e.get("valid") else headline_failure(e),
+        "failures": failure_kinds(e),
     }
 
 
-@app.get("/api/task")
-def task(benchmark: str, id: str, reveal: int = 0, dataset: str | None = None) -> dict[str, Any]:
-    b = bench(benchmark)
-    if id not in b.tasks:
-        raise HTTPException(404, f"no task {id}")
-    t = b.tasks[id]
-    row = next(r for r in b.rows if r["id"] == id)
-    hidden = t["split"] in HELD_OUT and not reveal
-    prompt = PROMPT.format(
-        target=t["target_smiles"], max_steps=t["max_steps"], min_routes=t["min_routes"], max_routes=t["max_routes"]
-    )
-    d = STATE["datasets"].get(dataset or "")
-    runs = []
-    for run in STATE["runs"].values():
-        if run.benchmark != benchmark or id not in run.identity.get("task_ids", []):
-            continue
-        for episode in run.episodes:
-            if episode["task_id"] == id:
-                runs.append({"run": run.name, "label": run.identity.get("label"), **episode})
-    return {
-        "row": row,
-        "task": {k: v for k, v in t.items() if k != "reference_routes"},
-        "prompt": prompt,
-        "difficulty": b.difficulty.get(id),
-        "hidden": hidden,
-        "target_in_stock": canonicalize_smiles(t["target_smiles"]) in b.stock,
-        "routes": None if hidden else [_route(b, r) for r in t["reference_routes"]],
-        "sft": d.by_task.get(id, []) if d else [],
-        "runs": runs,
-    }
+def run_dirs() -> dict[str, Path]:
+    root = STATE["runs"]
+    return {p.parent.relative_to(root).as_posix(): p.parent for p in sorted(root.glob("**/identity.json"))}
 
 
-@app.get("/api/sft_row")
-def sft_row(dataset: str, id: str) -> dict[str, Any]:
-    d = STATE["datasets"].get(dataset)
-    if not d or id not in d.by_id:
-        raise HTTPException(404, "no such row")
-    row = d.read(id)
-    return {"meta": d.by_id[id], "messages": row["messages"], "tools": json.loads(row["tools"])}
-
-
-@app.get("/api/episode")
-def episode(run: str, file: str) -> dict[str, Any]:
-    r = STATE["runs"].get(run)
-    if not r or "/" in file or not (r.root / "episodes" / file).exists():
-        raise HTTPException(404, "no such episode")
-    row = json.loads((r.root / "episodes" / file).read_text())
-    layout = build_sft.LAYOUTS.get(r.identity.get("provider"), "chat")
-    if layout == "chat" and not row.get("prompt"):
-        row = {**row, "prompt": "(this run did not store its prompt)"}
+def run_dir(run: str) -> Path:
     try:
-        messages = build_sft.CONVERTERS[layout](row)
-    except Exception as exc:  # an unusual transcript: show it raw rather than fail
-        messages = [{"role": "user", "content": f"(could not normalise this transcript: {exc})"}]
+        return run_dirs()[run]
+    except KeyError:
+        raise HTTPException(404, f"unknown run {run!r}") from None
+
+
+def run_episodes(root: Path) -> list[dict[str, Any]]:
+    return [episode_row(p) for p in sorted((root / "episodes").glob("*.json"))]
+
+
+def run_summary(run: str, root: Path) -> dict[str, Any]:
+    identity = read_json(root / "identity.json")
+    progress, summary = root / "progress.json", root / "summary.json"
+    files = (root / "identity.json", progress, *(root / "episodes").glob("*.json"))
+    updated = max(p.stat().st_mtime for p in files if p.exists())
+    if summary.exists() and summary.stat().st_mtime >= updated:
+        status, stats = "done", read_json(summary)
+    else:
+        status = "running" if time.time() - updated < LIVE_WINDOW_S else "stopped"
+        stats = read_json(progress) if progress.exists() else {}
     return {
-        "messages": messages,
-        "score": {
-            k: row.get(k)
-            for k in (
-                "reward",
-                "valid",
-                "exact_match",
+        "run": run,
+        "folder": root.name,
+        "label": identity.get("label") or identity.get("model"),
+        "model": identity.get("model"),
+        "provider": identity.get("provider"),
+        "sampling": identity.get("sampling", {}),
+        "max_turns": identity.get("max_turns"),
+        "max_tool_calls": identity.get("max_tool_calls"),
+        "status": status,
+        "updated": updated,
+        "expected": stats.get("episodes_expected") or len(identity.get("task_ids") or []),
+        "graded": stats.get("episodes_graded", 0),
+        **{
+            key: stats.get(key)
+            for key in (
+                "pass_at_1",
+                "pass_at_1_ci95",
+                "exact_route_rate",
+                "mean_reward",
+                "mean_tool_calls",
+                "mean_latency_seconds",
+                "cost_usd",
+                "coerced_submission_rate",
+                "no_emit_rate",
                 "components",
-                "hard_failures",
-                "errors",
-                "submission_coerced",
-                "auto_emitted",
-                "usage",
+                "by_max_depth",
             )
         },
     }
 
 
-@app.get("/api/run")
-def run_detail(run: str) -> dict[str, Any]:
-    r = STATE["runs"].get(run)
-    if not r:
-        raise HTTPException(404, f"no run {run}")
-    return {"summary": r.summary(), "episodes": r.episodes}
+def release_for(task_id: str) -> Release | None:
+    return next((b for b in STATE["releases"].values() if task_id in b.tasks), None)
+
+
+def tree_smiles(node: Any) -> set[str]:
+    if isinstance(node, list):
+        return set().union(*map(tree_smiles, node)) if node else set()
+    if not isinstance(node, dict):
+        return set()
+    own = {node["smiles"]} if node.get("type") == "mol" and isinstance(node.get("smiles"), str) else set()
+    return own | tree_smiles(node.get("children") or [])
+
+
+def stock_status(task_id: str, smiles: set[str]) -> dict[str, bool]:
+    b = release_for(task_id)
+    if b is None:
+        return {}
+    excluded = set(b.tasks[task_id]["constraints"]["excluded_stock"])
+    out = {}
+    for s in smiles:
+        try:
+            canonical = canonicalize_smiles(s)
+        except Exception:
+            out[s] = False
+            continue
+        out[s] = canonical in b.stock and canonical not in excluded
+    return out
+
+
+@app.get("/api/evals")
+def evals() -> dict[str, Any]:
+    sets = Counter(Path(run).parent.as_posix() for run in run_dirs())
+    return {"sets": [{"name": name, "runs": n} for name, n in sorted(sets.items())]}
+
+
+@app.get("/api/evals/board")
+def evals_board(name: str) -> dict[str, Any]:
+    runs = {run: root for run, root in run_dirs().items() if Path(run).parent.as_posix() == name}
+    if not runs:
+        raise HTTPException(404, f"no runs in {name!r}")
+    summaries, cells, tasks = [], {}, {}
+    for run, root in runs.items():
+        summaries.append(run_summary(run, root))
+        for task_id in read_json(root / "identity.json").get("task_ids") or []:
+            tasks.setdefault(task_id, {"id": task_id})
+        cells[run] = {}
+        for row in run_episodes(root):
+            tasks.setdefault(row["task_id"], {"id": row["task_id"]}).update(
+                smiles=row["smiles"], tier=row["tier"], max_depth=row["max_depth"]
+            )
+            cells[run][row["task_id"]] = {k: row[k] for k in ("reward", "valid", "exact", "graded", "failure")}
+    return {"set": name, "runs": summaries, "tasks": list(tasks.values()), "cells": cells}
+
+
+@app.get("/api/evals/run")
+def evals_run(run: str) -> dict[str, Any]:
+    root = run_dir(run)
+    episodes = run_episodes(root)
+    failed = [e for e in episodes if e["graded"] and not e["valid"]]
+    return {
+        "summary": run_summary(run, root),
+        "episodes": episodes,
+        "failures": Counter(kind for e in failed for kind in e["failures"]).most_common(),
+        "failed": len(failed),
+    }
+
+
+def same_task_elsewhere(run: str, task: str, attempt: int) -> list[dict[str, Any]]:
+    """This task's result for every model in the same eval set: its newest run, or the viewed run."""
+    chosen: dict[str, tuple[tuple[bool, float], dict[str, Any]]] = {}
+    for other, root in run_dirs().items():
+        if Path(other).parent != Path(run).parent:
+            continue
+        episode = next((root / "episodes").glob(f"*-{task}-a{attempt}.json"), None)
+        if episode is None:
+            continue
+        identity = read_json(root / "identity.json")
+        rank = (other == run, (root / "identity.json").stat().st_mtime)
+        if identity["model"] not in chosen or rank > chosen[identity["model"]][0]:
+            row = episode_row(episode)
+            entry = {"run": other, "label": identity.get("label") or identity["model"], "current": other == run}
+            chosen[identity["model"]] = (rank, {**entry, **{k: row[k] for k in ("reward", "valid", "exact", "graded")}})
+    return sorted((entry for _, entry in chosen.values()), key=lambda e: (-(e["reward"] or 0), e["label"]))
+
+
+@app.get("/api/evals/episode")
+def evals_episode(run: str, task: str, attempt: int = 0) -> dict[str, Any]:
+    root = run_dir(run)
+    paths = sorted((root / "episodes").glob(f"*-{task}-a{attempt}.json"))
+    if not paths:
+        raise HTTPException(404, f"no episode for {task} in {run}")
+    episode = read_json(paths[0])
+    submission = episode.get("submission")
+    routes = submission.get("routes") if isinstance(submission, dict) else None
+    order = [row["task_id"] for row in run_episodes(root)]
+    at = order.index(task)
+    return {
+        "summary": run_summary(run, root),
+        "episode": episode,
+        "stock": stock_status(task, tree_smiles(routes or [])),
+        "has_task": release_for(task) is not None,
+        "same_task": same_task_elsewhere(run, task, attempt),
+        "prev": order[at - 1] if at > 0 else None,
+        "next": order[at + 1] if at + 1 < len(order) else None,
+    }
 
 
 @lru_cache(maxsize=20000)
@@ -674,22 +603,19 @@ app.mount("/static", StaticFiles(directory=STATIC), name="static")
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--port", type=int, default=8050)
+    parser.add_argument("--release", type=Path, action="append", default=[], help="a release directory (repeatable)")
+    parser.add_argument("--runs", type=Path, default=ROOT / "runs", help="eval output root (eval/run_eval.py --output)")
     args = parser.parse_args()
-    # Fail before loading anything if another explorer already holds the port.
+    STATE["runs"] = args.runs.resolve()
     with socket.socket() as probe:
         if probe.connect_ex(("127.0.0.1", args.port)) == 0:
-            raise SystemExit(
-                f"port {args.port} is in use (another explorer?); open http://127.0.0.1:{args.port} "
-                f"or start this one with --port {args.port + 1}"
-            )
-    STATE["benchmarks"] = discover_benchmarks()
-    STATE["datasets"] = discover_datasets()
-    STATE["runs"] = discover_runs(STATE["benchmarks"])
-    print(
-        f"ready: {len(STATE['benchmarks'])} benchmarks, {len(STATE['datasets'])} SFT datasets, {len(STATE['runs'])} runs "
-        f"on http://127.0.0.1:{args.port}",
-        file=sys.stderr,
-    )
+            raise SystemExit(f"port {args.port} is in use; open http://127.0.0.1:{args.port} or pass --port {args.port + 1}")
+    STATE["releases"] = discover(args.release)
+    if not STATE["releases"]:
+        raise SystemExit("no release found: build one with `uv run python -m dataset.build_release` or pass --release")
+    for b in STATE["releases"].values():
+        threading.Thread(target=lambda b=b: b.stock, daemon=True).start()
+    print(f"ready: {', '.join(STATE['releases'])} on http://127.0.0.1:{args.port}", file=sys.stderr)
     uvicorn.run(app, host="127.0.0.1", port=args.port, log_level="warning")
 
 
