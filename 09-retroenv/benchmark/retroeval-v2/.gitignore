@@ -1,5 +1,0 @@
-# Hidden answers stay out of git; rebuild them (README.md) and check checksums.json.
-tasks-private/
-normalized-routes.jsonl
-difficulty.jsonl
-baselines/*.jsonl

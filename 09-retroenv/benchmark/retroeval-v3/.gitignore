@@ -1,7 +1,0 @@
-# Hidden answers stay out of git; rebuild them (README.md) and check checksums.json.
-tasks-private/
-normalized-routes.jsonl
-difficulty.jsonl
-baselines/*.jsonl
-# 27k public train rows (11 MB) are rebuilt with the private files.
-tasks-public/train.jsonl
