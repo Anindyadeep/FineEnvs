@@ -54,8 +54,9 @@ RETROENV_TASKS_REPO=LiteFold/RetroEnv uv run bash envs/retro_route/openenv/start
 ```
 
 `start.sh` runs `prepare.py`, which downloads a released task dataset from the Hub
-(`RETROENV_TASKS_REPO`) and verifies its checksums, then starts the server on it. To serve a
-local release instead:
+(`RETROENV_TASKS_REPO`) and verifies its checksums, then starts the server on it. The public
+release serves train and dev; add `RETROENV_HELDOUT_REPO=LiteFold/RetroEnv-heldout` and an
+`HF_TOKEN` that can read it to serve test_id and test_hard too. To serve a local release instead:
 
 ```bash
 RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
@@ -85,16 +86,18 @@ docker run --rm -p 8000:8000 -v "$PWD/data/release/RetroEnv-RL:/data:ro" \
 To deploy a Space that serves the published benchmark:
 
 ```bash
-python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv
+python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv \
+  --heldout-repo LiteFold/RetroEnv-heldout     # omit to serve train and dev only
 ```
 
-A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space can read it. The Space is private by default; `--public` makes it public.
+The held-out repo is private; add `HF_TOKEN` as a Space secret so the Space can read it. The Space is private by default; `--public` makes it public.
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `RETROENV_BENCHMARK_DIR` | none | Local release directory with `tasks-private/`, `stocks/` and `library/` |
 | `RETROENV_TASKS_REPO` | `LiteFold/RetroEnv` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
 | `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset |
+| `RETROENV_HELDOUT_REPO` | none | Private dataset with the held-out splits' `tasks-private/` rows; without it those splits are not served |
 | `RETROENV_TOOLSET` | `full` | `unaided` removes `validate_disconnection` (an ablation) |
 | `RETROENV_MAX_TOOL_CALLS` | `32` | Tool budget per episode |
 | `RETROENV_DEFAULT_SPLIT` | `train` | Split used by a reset that names none |

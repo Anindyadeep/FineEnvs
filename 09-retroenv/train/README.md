@@ -3,9 +3,10 @@
 RetroEnv is an OpenEnv HTTP/MCP environment. Start it against a release
 (`data/release/RetroEnv-RL`), then give the trainer deterministic
 `reset(split="train", index=i)` rows. Download the release with
-`uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL`;
-the environment needs `tasks-private/`, because its known routes feed the reward and hide
-a train task's own reactions from the tools.
+`uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL`.
+That public release carries the known routes of train and dev, which training needs: they
+feed the reward and hide a train task's own reactions from the tools. The held-out test
+splits' known routes are private and are only needed to evaluate on those splits.
 
 Before spending GPU time:
 

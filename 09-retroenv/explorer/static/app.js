@@ -353,7 +353,9 @@ async function taskView(view, id, params) {
         </div></div>
       <div class="panel"><div class="panel-h"><h2>Known routes, hidden from the policy</h2></div>
         <div class="panel-b">${
-          t.hidden
+          t.withheld
+            ? `<div class="note">The known routes of ${esc(r.split)} are held out of this release, in the private held-out repo.</div>`
+            : t.hidden
             ? `<div class="note">This is a held-out ${esc(r.split)} task, so its routes stay hidden by default. <button class="link" id="reveal" type="button">Show them</button></div>`
             : `<p class="faint sm" style="margin-bottom:10px">Evidence for the similarity bonus only: the verifier accepts any route whose steps the reaction library supports. Witness routes recombine corpus reactions to prove the task is solvable under its constraint.</p>` +
               t.routes
@@ -364,14 +366,18 @@ async function taskView(view, id, params) {
 
     <div class="section">
       <h2>Try it <span class="faint sm">· play this task through the same core session the server runs</span></h2>
-      <div class="panel" id="play"><div class="panel-b"><div class="toolbar" style="margin:0">
+      <div class="panel" id="play"><div class="panel-b">${
+        t.withheld
+          ? `<div class="note">Episodes on this split cannot be scored without its held-out known routes.</div>`
+          : `<div class="toolbar" style="margin:0">
         <select id="toolset" aria-label="Toolset"><option value="full">full toolset</option><option value="unaided">unaided (no step checker)</option></select>
         <button class="btn primary" id="start" type="button">Start an episode</button>
-        <span class="faint sm">The first start loads the reaction library and precedent index, about a minute.</span></div></div></div>
+        <span class="faint sm">The first start loads the reaction library and precedent index, about a minute.</span></div>`
+      }</div></div>
     </div>`;
   $("#reveal")?.addEventListener("click", () => go(`/task/${encodeURIComponent(id)}`, { ...params, reveal: 1 }));
   view.querySelectorAll("[data-route]").forEach((host) => mountRouteGraph(host, t.routes[host.dataset.route], r.smiles));
-  $("#start").addEventListener("click", () =>
+  $("#start")?.addEventListener("click", () =>
     startPlay($("#play"), id, r.smiles, $("#toolset").value, canReveal, params.reveal || 0),
   );
 }

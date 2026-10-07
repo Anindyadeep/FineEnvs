@@ -3,12 +3,14 @@
 
     python deploy.py --stage-only --stage-dir /tmp/retroenv-space   # build locally
     docker build -t retroenv /tmp/retroenv-space
-    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv
+    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv \
+        [--heldout-repo LiteFold/RetroEnv-heldout]
 
 The Space gets Dockerfile and README.md at its root, with core/ and openenv/
 beside them, the same layout the Dockerfile builds locally from envs/retro_route.
 The answer key is not uploaded with the Space: it downloads the task dataset
-named by --tasks-repo at startup (an HF_TOKEN Space secret if that dataset is private).
+named by --tasks-repo at startup, plus the held-out test splits from --heldout-repo
+(an HF_TOKEN Space secret if either dataset is private).
 """
 
 from __future__ import annotations
@@ -42,6 +44,10 @@ def main() -> int:
         "--tasks-repo",
         help="task dataset with tasks-private/ and stocks/ (org/name[@revision]), e.g. LiteFold/RetroEnv",
     )
+    parser.add_argument(
+        "--heldout-repo",
+        help="private dataset with the held-out splits' tasks-private/ rows, e.g. LiteFold/RetroEnv-heldout",
+    )
     parser.add_argument("--public", action="store_true", help="create the Space public (default private)")
     parser.add_argument("--concurrency", type=int, default=64)
     parser.add_argument("--toolset", choices=("full", "unaided"), default="full")
@@ -60,17 +66,20 @@ def main() -> int:
 
     api = HfApi()
     api.create_repo(args.repo, repo_type="space", space_sdk="docker", private=not args.public, exist_ok=True)
-    for key, value in {
+    variables = {
         "MAX_CONCURRENT_ENVS": str(args.concurrency),
         "ENABLE_WEB_INTERFACE": "true",
         "RETROENV_TASKS_REPO": args.tasks_repo,
         "RETROENV_TOOLSET": args.toolset,
-    }.items():
+    }
+    if args.heldout_repo:
+        variables["RETROENV_HELDOUT_REPO"] = args.heldout_repo
+    for key, value in variables.items():
         api.add_space_variable(args.repo, key, value)
     api.upload_folder(
         repo_id=args.repo, repo_type="space", folder_path=staged, commit_message="Deploy RetroEnv OpenEnv server"
     )
-    print(f"https://huggingface.co/spaces/{args.repo}  (add HF_TOKEN as a Space secret if the task dataset is private)")
+    print(f"https://huggingface.co/spaces/{args.repo}  (add HF_TOKEN as a Space secret if a task dataset is private)")
     return 0
 
 

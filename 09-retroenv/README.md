@@ -15,13 +15,18 @@ evidence, not proof that a synthesis works in the lab.
 uv sync --extra dev --extra eval
 uv run pytest                                            # runs on tests/fixtures/mini-release
 
-# The release (212 MB, public): https://huggingface.co/datasets/LiteFold/RetroEnv
+# The public release: https://huggingface.co/datasets/LiteFold/RetroEnv
+# (every split's tasks, known routes for train and dev, stock, reaction library)
 uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL
+# Held-out test known routes are private (LiteFold/RetroEnv-heldout); with access:
+uv run hf download LiteFold/RetroEnv-heldout --repo-type dataset --include 'tasks-private/*' \
+  --local-dir data/release/RetroEnv-RL
 
 # Or rebuild it from PaRoutes v2 (346 MB download, about an hour on 32 cores)
 uv run python dataset/download_raw.py --source paroutes-v2-benchmark
 uv run python -m dataset.build_release                   # data/release/RetroEnv-RL (git-ignored)
 uv run python -m dataset.audit_release                   # leakage, solvability, reward probes
+uv run python -m dataset.publish_release --runs runs     # Hub: public release + private held-out routes
 
 RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
 uv run python explorer/server.py                         # http://127.0.0.1:8050

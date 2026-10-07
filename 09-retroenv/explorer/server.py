@@ -82,12 +82,19 @@ class Release:
         self.root = root
         self.manifest = json.loads((root / "manifest.json").read_text()) if (root / "manifest.json").exists() else {}
         self.tasks: dict[str, dict[str, Any]] = {}
+        # Splits whose known routes are not in this release (the public download): shown, never scored.
+        self.withheld: set[str] = set()
         for split in SPLITS:
-            path = root / "tasks-private" / f"{split}.jsonl"
-            if path.exists():
-                for line in path.open(encoding="utf-8"):
-                    task = json.loads(line)
-                    self.tasks[task["task_id"]] = task
+            private = root / "tasks-private" / f"{split}.jsonl"
+            path = private if private.exists() else root / "tasks-public" / f"{split}.jsonl"
+            if not path.exists():
+                continue
+            if path != private:
+                self.withheld.add(split)
+            for line in path.open(encoding="utf-8"):
+                task = json.loads(line)
+                task.setdefault("reference_routes", [])
+                self.tasks[task["task_id"]] = task
         self.rows = sorted((self._row(t) for t in self.tasks.values()), key=lambda r: (SPLITS.index(r["split"]), r["id"]))
         self._stock: frozenset[str] | None = None
         self._stock_lock = threading.Lock()
@@ -253,14 +260,16 @@ def task(benchmark: str, id: str, reveal: int = 0) -> dict[str, Any]:
     if id not in b.tasks:
         raise HTTPException(404, f"no task {id}")
     t = b.tasks[id]
-    hidden = t["split"] in HELD_OUT and not reveal
+    withheld = t["split"] in b.withheld
+    hidden = withheld or (t["split"] in HELD_OUT and not reveal)
     excluded = set(t["constraints"]["excluded_stock"])
     return {
         "row": next(r for r in b.rows if r["id"] == id),
         "task": {k: v for k, v in t.items() if k not in {"reference_routes", "difficulty"}},
-        "prompt": task_prompt(RetroTask.from_dict(t)),
+        "prompt": task_prompt(RetroTask.from_dict(t, public=True)),
         "difficulty": t.get("difficulty", {}),
         "hidden": hidden,
+        "withheld": withheld,
         "target_in_stock": t["target_smiles"] in b.stock and t["target_smiles"] not in excluded,
         "routes": None if hidden else [_route(b, r) for r in t["reference_routes"]],
         "siblings": [r["id"] for r in b.rows if r["parent"] == t["parent_id"] and r["id"] != id],
@@ -288,6 +297,8 @@ def new_session(request: NewSession) -> dict[str, Any]:
     b = release(request.benchmark)
     if request.task not in b.tasks:
         raise HTTPException(404, f"no task {request.task}")
+    if b.tasks[request.task]["split"] in b.withheld:
+        raise HTTPException(409, "this split's known routes are held out of this release, so its episodes cannot be scored")
     core = load_benchmark(str(b.root.resolve()))
     session = core.session(toolset=request.toolset)
     observation = session.reset(RetroTask.from_dict(b.tasks[request.task]), b.stock)
