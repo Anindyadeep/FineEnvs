@@ -36,13 +36,13 @@ def test_a_public_repo_downloads_without_a_token_and_prints_its_directory(tmp_pa
     calls = _fake_hub(monkeypatch, FIXTURE)
     monkeypatch.delenv("RETROENV_BENCHMARK_DIR", raising=False)
     monkeypatch.delenv("HF_TOKEN", raising=False)
-    monkeypatch.setenv("RETROENV_TASKS_REPO", "AdithyaSK/RetroEnv-RL@main")
+    monkeypatch.setenv("RETROENV_TASKS_REPO", "LiteFold/RetroEnv@main")
     monkeypatch.setenv("RETROENV_PREPARED_DIR", str(tmp_path))
     assert prepare.main() == 0
     assert capsys.readouterr().out.strip().splitlines()[-1] == str(tmp_path)
     assert calls == [
         {
-            "repo": "AdithyaSK/RetroEnv-RL",
+            "repo": "LiteFold/RetroEnv",
             "revision": "main",
             "token": None,
             "patterns": ["tasks-private/*", "stocks/*", "library/*", "checksums.json", "manifest.json"],
@@ -53,12 +53,12 @@ def test_a_public_repo_downloads_without_a_token_and_prints_its_directory(tmp_pa
 def test_a_subdirectory_serves_another_benchmark_from_the_same_repo(tmp_path, monkeypatch, capsys):
     calls = _fake_hub(monkeypatch, FIXTURE)
     monkeypatch.delenv("RETROENV_BENCHMARK_DIR", raising=False)
-    monkeypatch.setenv("RETROENV_TASKS_REPO", "AdithyaSK/RetroEnv-RL")
-    monkeypatch.setenv("RETROENV_TASKS_SUBDIR", "retroeval-v2")
+    monkeypatch.setenv("RETROENV_TASKS_REPO", "LiteFold/RetroEnv")
+    monkeypatch.setenv("RETROENV_TASKS_SUBDIR", "previous-release")
     monkeypatch.setenv("RETROENV_PREPARED_DIR", str(tmp_path))
     assert prepare.main() == 0
-    assert capsys.readouterr().out.strip().splitlines()[-1] == str(tmp_path / "retroeval-v2")
-    assert all(pattern.startswith("retroeval-v2/") for pattern in calls[0]["patterns"])
+    assert capsys.readouterr().out.strip().splitlines()[-1] == str(tmp_path / "previous-release")
+    assert all(pattern.startswith("previous-release/") for pattern in calls[0]["patterns"])
 
 
 def test_without_a_source_it_says_what_to_set(monkeypatch):

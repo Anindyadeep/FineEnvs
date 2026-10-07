@@ -3,7 +3,7 @@
 
     python deploy.py --stage-only --stage-dir /tmp/retroenv-space   # build locally
     docker build -t retroenv /tmp/retroenv-space
-    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo AdithyaSK/RetroEnv-RL
+    python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv
 
 The Space gets Dockerfile and README.md at its root, with core/ and openenv/
 beside them, the same layout the Dockerfile builds locally from envs/retro_route.
@@ -40,7 +40,7 @@ def main() -> int:
     parser.add_argument("--repo", help="Space id, e.g. FineEnvs/retroenv")
     parser.add_argument(
         "--tasks-repo",
-        help="task dataset with tasks-private/ and stocks/ (org/name[@revision]), e.g. AdithyaSK/RetroEnv-RL",
+        help="task dataset with tasks-private/ and stocks/ (org/name[@revision]), e.g. LiteFold/RetroEnv",
     )
     parser.add_argument("--public", action="store_true", help="create the Space public (default private)")
     parser.add_argument("--concurrency", type=int, default=64)

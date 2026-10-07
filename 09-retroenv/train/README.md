@@ -1,8 +1,11 @@
 # Training handoff
 
 RetroEnv is an OpenEnv HTTP/MCP environment. Start it against a release
-(`data/release/RetroEnv-RL`, built by `dataset/build_release.py`), then give the trainer
-deterministic `reset(split="train", index=i)` rows.
+(`data/release/RetroEnv-RL`), then give the trainer deterministic
+`reset(split="train", index=i)` rows. Download the release with
+`uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL`;
+the environment needs `tasks-private/`, because its known routes feed the reward and hide
+a train task's own reactions from the tools.
 
 Before spending GPU time:
 

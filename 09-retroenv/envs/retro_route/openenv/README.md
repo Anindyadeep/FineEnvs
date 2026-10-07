@@ -50,7 +50,7 @@ From the project folder (`09-retroenv`):
 
 ```bash
 uv sync --extra dev --extra eval
-RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL uv run bash envs/retro_route/openenv/start.sh
+RETROENV_TASKS_REPO=LiteFold/RetroEnv uv run bash envs/retro_route/openenv/start.sh
 ```
 
 `start.sh` runs `prepare.py`, which downloads a released task dataset from the Hub
@@ -68,11 +68,11 @@ uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000
   --split test_id --index 0 --provider anthropic --model claude-opus-5-5
 ```
 
-Releases are not in git; build one with `uv run python -m dataset.build_release` or download it from the Hub. `tests/fixtures/mini-release` is a small committed release for tests.
+Releases are not in git. Download the published one with `uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL`, or build it with `uv run python -m dataset.build_release`. `tests/fixtures/mini-release` is a small committed release for tests.
 
 ## Docker and Spaces
 
-The image never contains the answer key. At startup `prepare.py` uses a mounted directory or downloads a task dataset; the image defaults to `RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL`.
+The image never contains the answer key. At startup `prepare.py` uses a mounted directory or downloads a task dataset; the image defaults to `RETROENV_TASKS_REPO=LiteFold/RetroEnv`.
 
 ```bash
 python deploy.py --stage-only --stage-dir /tmp/retroenv-space
@@ -85,7 +85,7 @@ docker run --rm -p 8000:8000 -v "$PWD/data/release/RetroEnv-RL:/data:ro" \
 To deploy a Space that serves the published benchmark:
 
 ```bash
-python deploy.py --repo YOUR_ORG/retroenv --tasks-repo AdithyaSK/RetroEnv-RL
+python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv
 ```
 
 A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space can read it. The Space is private by default; `--public` makes it public.
@@ -93,7 +93,7 @@ A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space
 | Variable | Default | Meaning |
 |---|---|---|
 | `RETROENV_BENCHMARK_DIR` | none | Local release directory with `tasks-private/`, `stocks/` and `library/` |
-| `RETROENV_TASKS_REPO` | `AdithyaSK/RetroEnv-RL` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
+| `RETROENV_TASKS_REPO` | `LiteFold/RetroEnv` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
 | `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset |
 | `RETROENV_TOOLSET` | `full` | `unaided` removes `validate_disconnection` (an ablation) |
 | `RETROENV_MAX_TOOL_CALLS` | `32` | Tool budget per episode |

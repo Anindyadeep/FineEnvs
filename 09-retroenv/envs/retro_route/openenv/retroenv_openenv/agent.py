@@ -1,8 +1,7 @@
 """OpenAI-compatible tool-calling agent loop against a RetroEnv server.
 
-The loop matches the v1 board runner (eval/run_model.py): the final model turn
-exposes only emit_routes, two empty turns force that terminal turn, and each
-tool result carries the turns left. The difference is transport: tools are
+The final model turn exposes only emit_routes, two empty turns force that
+terminal turn, and each tool result carries the turns left. Tools are
 discovered from the server and every call goes through it, so the reward is
 the server's. An episode that ends without emit_routes is closed by
 submitting an empty route set, which scores the verifier's floor.

@@ -1,6 +1,6 @@
 # Evaluate a model
 
-`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `benchmark/retroeval-v3`; download it from [AdithyaSK/RetroEnv-RL](https://huggingface.co/datasets/AdithyaSK/RetroEnv-RL) or point `--server` at one started with `RETROENV_TASKS_REPO`). The published board is on v2 (`--benchmark-dir benchmark/retroeval-v2`); v3 has none yet.
+`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The published runs on 30 test_id tasks are in that dataset under `runs/`.
 
 ```bash
 uv sync --extra dev --extra eval
@@ -60,20 +60,4 @@ Three loops implement the same protocol: `agent.py` for OpenAI-compatible chat, 
 | `episodes/NNNN-<task>-aK.json` | Reward, components, failures, usage, cost, the submission and the full transcript |
 | `progress.json`, `summary.json` | Coverage, pass@1 with a Wilson CI, exact route rate, reward and components, tool calls, no-emit and refusal rates, cost, and breakdowns by route count, step cap and heuristic tier |
 
-Rerun the same command to resume. Graded episodes are kept, and those that hit a provider or transport error are retried. Transcripts contain solved routes, so `runs/` is gitignored and only `summarize.py` output is committed.
-
-## The v1 board tools
-
-These scripts reproduce the v1 board (20 tasks, run in-process over OpenRouter) and are unchanged. Predictions there are JSONL, one row per task with ranked attempts:
-
-```json
-{"task_id": "retro_...", "attempts": [{"submission": {"schema_version": "retro-route-graph-v1", "routes": []},
-  "tool_calls": 6, "invalid_proposals": 1}]}
-```
-
-`retroenv-eval` recomputes every reward from the private tasks and the pinned stock, and never trusts a submitted reward. A missing task fails Pass@k instead of leaving the denominator; duplicate rows and unknown task IDs are errors.
-
-* `run_model.py`: drives an OpenAI-compatible endpoint on the in-process session. It checkpoints each attempt, supports `--resume` and a provider-reported cost cap, and restricts the last turn to `emit_routes`.
-* `estimate_board_cost.py`: projects cost from measured episode tokens. `benchmark_models.json` holds the model IDs and the dated price snapshot.
-* `merge_model_shards.py`: merges `--start-index`/`--limit` shards and rejects duplicate, missing or mismatched ones.
-* `summarize_board.py`: the cross-model JSON and Markdown table.
+Rerun the same command to resume. Graded episodes are kept, and those that hit a provider or transport error are retried. `runs/` is gitignored; published runs go to the `runs/` folder of the Hub dataset.

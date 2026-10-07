@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn run_eval.py output directories into one results table.
 
-    uv run python eval/summarize.py runs/v2-eval/* --output benchmark/retroeval-v2/results
+    uv run python eval/summarize.py runs/test_id/* --output runs/test_id/results
 
 Writes RESULTS.md (the board plus breakdowns) and board.json (every summary),
 sorted by pass@1 and then mean reward. Transcripts stay in the run directories.

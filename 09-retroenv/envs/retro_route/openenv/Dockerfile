@@ -4,7 +4,7 @@
 FROM python:3.12-slim
 ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 HOME=/home/user \
     PORT=8000 ENABLE_WEB_INTERFACE=true RETROENV_PREPARED_DIR=/app/prepared \
-    RETROENV_TASKS_REPO=AdithyaSK/RetroEnv-RL
+    RETROENV_TASKS_REPO=LiteFold/RetroEnv
 # RDKit's molecule drawing (the playground) links against X11 render libraries.
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libxrender1 libxext6 libexpat1 libfreetype6 libfontconfig1 \

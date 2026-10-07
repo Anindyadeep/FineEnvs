@@ -15,6 +15,10 @@ evidence, not proof that a synthesis works in the lab.
 uv sync --extra dev --extra eval
 uv run pytest                                            # runs on tests/fixtures/mini-release
 
+# The release (212 MB, public): https://huggingface.co/datasets/LiteFold/RetroEnv
+uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL
+
+# Or rebuild it from PaRoutes v2 (346 MB download, about an hour on 32 cores)
 uv run python dataset/download_raw.py --source paroutes-v2-benchmark
 uv run python -m dataset.build_release                   # data/release/RetroEnv-RL (git-ignored)
 uv run python -m dataset.audit_release                   # leakage, solvability, reward probes
