@@ -114,7 +114,7 @@ class RetroTask:
     schema_version: str = TASK_SCHEMA
 
     @classmethod
-    def from_dict(cls, value: dict[str, Any], *, public: bool = False) -> "RetroTask":
+    def from_dict(cls, value: dict[str, Any]) -> "RetroTask":
         task = cls(
             task_id=str(value["task_id"]),
             parent_id=str(value.get("parent_id") or value["task_id"]),
@@ -136,8 +136,7 @@ class RetroTask:
             raise ValueError("max_depth must be positive")
         if not 1 <= task.min_routes <= task.max_routes <= 5:
             raise ValueError("route count bounds must satisfy 1 <= min_routes <= max_routes <= 5")
-        # A public row (a held-out split whose answers are withheld) can be shown, never scored.
-        if not task.reference_routes and not public:
+        if not task.reference_routes:
             raise ValueError(f"task {task.task_id!r} has no private reference routes")
         return task
 

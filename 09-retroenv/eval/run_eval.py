@@ -349,10 +349,7 @@ def main() -> int:
 
     private = args.benchmark_dir / "tasks-private" / f"{args.split}.jsonl"
     if not args.server and not private.exists():
-        parser.error(
-            f"{private} is missing: the known routes of {args.split!r} are not in this release. "
-            "Held-out test splits come from the held-out repo (see eval/README.md)."
-        )
+        parser.error(f"{private} is missing; download the release from LiteFold/RetroEnv (see eval/README.md)")
     tiers = {}
     if private.exists():
         tiers = {row["task_id"]: row.get("difficulty", {}).get("tier") for row in map(json.loads, private.open())}

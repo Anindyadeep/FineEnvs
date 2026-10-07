@@ -1,13 +1,6 @@
 # Evaluate a model
 
-`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The public release scores train and dev. The known routes of test_id and test_hard are in the private `LiteFold/RetroEnv-heldout`, so evaluating on them needs access to it:
-
-```bash
-uv run hf download LiteFold/RetroEnv-heldout --repo-type dataset --include 'tasks-private/*' \
-  --local-dir data/release/RetroEnv-RL
-```
-
-The runs on 30 test_id tasks are in that held-out repo under `runs/`, because their exact solutions reveal held-out answers.
+`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The release is fully open: every split, test_id and test_hard included, ships its known routes, and the runs on 30 test_id tasks are under `runs/`. Use dev to pick checkpoints during training and report test_id and test_hard, so test scores never steer training.
 
 ```bash
 uv sync --extra dev --extra eval
@@ -67,4 +60,4 @@ Three loops implement the same protocol: `agent.py` for OpenAI-compatible chat, 
 | `episodes/NNNN-<task>-aK.json` | Reward, components, failures, usage, cost, the submission and the full transcript |
 | `progress.json`, `summary.json` | Coverage, pass@1 with a Wilson CI, exact route rate, reward and components, tool calls, no-emit and refusal rates, cost, and breakdowns by route count, step cap and heuristic tier |
 
-Rerun the same command to resume. Graded episodes are kept, and those that hit a provider or transport error are retried. `runs/` is gitignored; `dataset/publish_release.py --runs runs` publishes runs into the private held-out repo.
+Rerun the same command to resume. Graded episodes are kept, and those that hit a provider or transport error are retried. `runs/` is gitignored; `dataset/publish_release.py --runs runs` publishes them with the release.
