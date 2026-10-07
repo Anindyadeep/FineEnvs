@@ -11,11 +11,17 @@ from rdkit.Chem.Draw import rdMolDraw2D
 
 STYLE = """
 <style>
+/* Gradio's own chrome: its footer advertises Gradio rather than the environment. */
+footer { display: none !important; }
+.gradio-container { max-width: 1280px !important; }
+.gradio-container .block { box-shadow: none; }
+.gradio-container .tabs { border: none; }
+.gradio-container .tab-nav button { font-weight: 500; }
 .gradio-container .retro { font-size: 13px; line-height: 1.5; color: var(--body-text-color); }
 .gradio-container .retro .muted { color: var(--body-text-color-subdued); }
 .gradio-container .retro .mono { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
-.gradio-container .retro .mol { background: #fff; border: 1px solid var(--border-color-primary);
-  border-radius: 6px; display: inline-block; line-height: 0; }
+.gradio-container .retro .mol { border: 1px solid var(--border-color-primary); border-radius: 6px;
+  display: inline-block; line-height: 0; padding: 2px; color: var(--body-text-color); }
 .gradio-container .retro table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
 .gradio-container .retro th, .gradio-container .retro td { text-align: left; padding: 4px 8px;
   border-bottom: 1px solid var(--border-color-primary); vertical-align: top; }
@@ -37,6 +43,7 @@ STYLE = """
 
 @lru_cache(maxsize=512)
 def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
+    """Monochrome drawing; strokes and glyphs take currentColor so the page theme colours them."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return '<span class="muted">unparsable SMILES</span>'
@@ -44,9 +51,11 @@ def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
     options = drawer.drawOptions()
     options.clearBackground = False
     options.padding = 0.08
+    options.bondLineWidth = 1.4
+    options.useBWAtomPalette()
     drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
-    svg = drawer.GetDrawingText()
+    svg = drawer.GetDrawingText().replace("#000000", "currentColor")
     return f'<span class="mol">{svg[svg.find("<svg") :]}</span>'
 
 
