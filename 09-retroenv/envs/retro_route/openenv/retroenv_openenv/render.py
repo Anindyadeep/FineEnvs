@@ -107,6 +107,73 @@ def _route_node(node: Any, depth: int = 0) -> str:
     return out
 
 
+def plan_panel(target: str, plan: dict[str, tuple[str, ...]], stock: dict[str, bool]) -> str:
+    """The route being assembled by hand, with each precursor's stock status as the tools reported it."""
+    if not target:
+        return wrap('<p class="muted">Start an episode to plan a route.</p>')
+
+    def node(smiles: str, depth: int = 0) -> str:
+        precursors = plan.get(smiles) if depth <= 12 else None
+        if precursors:
+            label = "to make"
+        elif stock.get(smiles):
+            label = '<span class="dot ok"></span>in stock'
+        elif smiles in stock:
+            label = '<span class="dot bad"></span>not in stock, not yet cut'
+        else:
+            label = '<span class="dot"></span>stock not checked'
+        out = (
+            f'<div class="node">{molecule_svg(smiles, 140, 95)}'
+            f'<div><div class="mono">{html.escape(smiles)}</div><div class="muted">{label}</div></div></div>'
+        )
+        for precursor in precursors or ():
+            out += f'<div class="tree">{node(precursor, depth + 1)}</div>'
+        return out
+
+    return wrap(node(target))
+
+
+def verdict_panel(result: dict[str, Any]) -> str:
+    """What validate_disconnection said about one proposed cut."""
+    if not isinstance(result, dict) or not result:
+        return wrap("")
+    if result.get("error"):
+        return wrap(f'<p><span class="dot bad"></span>{html.escape(str(result["error"]))}</p>')
+    supported = bool(result.get("supported"))
+    kind = {"known_precedent": "a recorded reaction", "reaction_template": "a frequent reaction template"}.get(
+        str(result.get("support")), str(result.get("support"))
+    )
+    head = (
+        f'<span class="dot ok"></span>Supported by {html.escape(kind)}'
+        if supported
+        else '<span class="dot bad"></span>The train-visible evidence does not support this cut'
+    )
+    rows = [("Reaction class", html.escape(str(result.get("reaction_class") or "unclassified")))]
+    if result.get("template_frequency"):
+        rows.append(("Template seen", f"{result['template_frequency']} times"))
+    if result.get("stereo_consistent") is not None:
+        rows.append(("Stereochemistry", "agrees" if result["stereo_consistent"] else "differs"))
+    return wrap(
+        f"<p style='margin:0 0 6px'>{head}</p>"
+        + key_values(rows)
+        + '<p class="muted" style="margin:6px 0 0">The final verifier uses a larger library, so it may still '
+        "accept a cut this call rejects.</p>"
+    )
+
+
+def stock_panel(found: list[tuple[str, dict[str, Any]]]) -> str:
+    """Stock lookups for the precursors of one proposed cut."""
+    rows = []
+    for smiles, result in found:
+        held = bool(result.get("results"))
+        status = '<span class="dot ok"></span>in stock' if held else '<span class="dot bad"></span>not in stock'
+        rows.append(
+            f"<tr><td>{molecule_svg(smiles, 110, 70)}</td>"
+            f'<td class="mono">{html.escape(smiles)}</td><td>{status}</td></tr>'
+        )
+    return wrap(f"<table><tbody>{''.join(rows)}</tbody></table>")
+
+
 def routes_panel(submission: Any) -> str:
     routes = submission.get("routes") if isinstance(submission, dict) else None
     if not routes:

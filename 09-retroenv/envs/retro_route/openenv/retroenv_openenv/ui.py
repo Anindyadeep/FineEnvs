@@ -13,6 +13,8 @@ from typing import Any
 
 import gradio as gr
 from openenv.core.env_server.mcp_types import CallToolAction
+from retroenv.chemistry import ChemistryError, canonicalize_smiles
+from retroenv.disconnections import describe, strategic_disconnections
 
 from . import render
 from .client import _tool_payload
@@ -111,6 +113,10 @@ class PlaygroundSession:
         self.history: list[dict[str, Any]] = []
         self.submission: Any = None
         self.score: dict[str, Any] | None = None
+        # The route being assembled by hand: product -> precursors, plus what the
+        # stock tool has revealed so far. Both drive the Plan tab.
+        self.plan: dict[str, tuple[str, ...]] = {}
+        self.stock_known: dict[str, bool] = {}
 
     def __deepcopy__(self, memo: dict) -> "PlaygroundSession":
         # Gradio copies the initial state per browser session; start each one empty.
@@ -122,6 +128,54 @@ class PlaygroundSession:
             self.env = RetroRouteEnvironment()
             self.opening = self.env.reset(split=split, index=int(index)).metadata
             self.history, self.submission, self.score = [], None, None
+            self.plan, self.stock_known = {}, {}
+
+    def frontier(self) -> list[str]:
+        """Molecules still to disconnect: the target, then any precursor neither cut nor known in stock."""
+        if not self.opening:
+            return []
+        out: list[str] = []
+        queue, seen = [canonicalize_smiles(self.opening["target_smiles"])], set()
+        while queue:
+            smiles = queue.pop(0)
+            if smiles in seen:
+                continue
+            seen.add(smiles)
+            precursors = self.plan.get(smiles)
+            if precursors:
+                queue.extend(precursors)
+            elif not self.stock_known.get(smiles):
+                out.append(smiles)
+        return out
+
+    def build_submission(self) -> dict[str, Any]:
+        """The plan as an emit_routes submission, claiming stock only where the stock tool confirmed it."""
+        target = canonicalize_smiles(self.opening["target_smiles"]) if self.opening else ""
+
+        def node(smiles: str, depth: int = 0) -> dict[str, Any]:
+            precursors = self.plan.get(smiles) if depth <= 12 else None
+            if not precursors:
+                return {
+                    "type": "mol",
+                    "smiles": smiles,
+                    "in_stock": self.stock_known.get(smiles, False),
+                    "children": [],
+                }
+            reaction = {
+                "type": "reaction",
+                "is_reaction": True,
+                "metadata": {
+                    "explanation": "",
+                    "reaction_class": "",
+                    "confidence": 0.5,
+                    "literature": [],
+                    "precursor_roles": {},
+                },
+                "children": [node(p, depth + 1) for p in precursors],
+            }
+            return {"type": "mol", "smiles": smiles, "in_stock": False, "children": [reaction]}
+
+        return {"routes": [node(target)]}
 
     def close(self) -> None:
         with self.lock:
@@ -139,9 +193,21 @@ class PlaygroundSession:
             self.history.append(
                 {"tool": tool, "arguments": json.dumps(arguments, sort_keys=True), "summary": _summary(result)}
             )
+            if tool == "stock_retrieve" and isinstance(result, dict):
+                self._note_stock(arguments, result)
             if tool == "emit_routes" and isinstance(result, dict) and result.get("score"):
                 self.submission, self.score = arguments.get("submission"), result["score"]
             return result
+
+    def _note_stock(self, arguments: dict[str, Any], result: dict[str, Any]) -> None:
+        """Everything the stock returns is in stock; an exact miss proves the query is not."""
+        for row in result.get("results") or []:
+            self.stock_known[str(row["smiles"])] = True
+        if result.get("mode") in {"exact", "inchikey"} and not result.get("results"):
+            try:
+                self.stock_known[canonicalize_smiles(str(arguments.get("query", "")))] = False
+            except ChemistryError:
+                pass
 
 
 def build_ui(*_: Any, **__: Any) -> gr.Blocks:
@@ -163,14 +229,37 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
         names = list(session.opening["tools"]) if session.opening else []
         return [name for name in names if name != "emit_routes"]
 
-    def panels(session: PlaygroundSession) -> tuple[str, str, str, str]:
+    def panels(
+        session: PlaygroundSession, keep: str = "", keep_cut: str = ""
+    ) -> tuple[str, str, str, str, str, Any, Any]:
+        """Every live panel. ``keep`` holds the molecule under study while it still needs cutting,
+        and ``keep_cut`` the proposed cut, so checking one does not make you choose it again."""
         state = session.env.state if session.env else None
+        target = canonicalize_smiles(session.opening["target_smiles"]) if session.opening else ""
+        frontier = session.frontier()
+        chosen = keep if keep in frontier else (frontier[0] if frontier else None)
+        cuts = cut_choices(chosen or "")
+        still_offered = any(keep_cut == value for _, value in cuts)
         return (
             render.target_panel(session.opening, state),
             render.history_panel(session.history),
             render.score_panel(session.score),
             render.routes_panel(session.submission),
+            render.plan_panel(target, session.plan, session.stock_known),
+            gr.update(choices=frontier, value=chosen),
+            # Gradio fires .change only on user input, so the cuts are refreshed here too.
+            gr.update(choices=cuts, value=keep_cut if still_offered else None),
         )
+
+    def cut_choices(product: str) -> list[tuple[str, str]]:
+        """Label each proposed cut with the forward reaction; the value carries the precursors."""
+        if not product:
+            return []
+        out = []
+        for cut in strategic_disconnections(product)[:8]:
+            phrase = describe(cut.family, cut.reactants, product)
+            out.append((f"{cut.bond} · {phrase}", ".".join(cut.reactants)))
+        return out
 
     with gr.Blocks(title="RetroEnv", theme=THEME) as demo:
         session = gr.State(PlaygroundSession())
@@ -190,12 +279,31 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                 start = gr.Button("Start episode", variant="primary")
                 target = gr.HTML(render.target_panel(None), apply_default_css=False)
             with gr.Column(scale=7, min_width=360):
+                with gr.Tab("Plan"):
+                    gr.HTML(
+                        render.wrap(
+                            "<p class='muted' style='margin:0 0 6px'>Cut the target back to molecules the stock "
+                            "holds. Checking a cut or a precursor spends a tool call, exactly as it would for a "
+                            "model.</p>"
+                        ),
+                        apply_default_css=False,
+                    )
+                    frontier = gr.Dropdown([], label="Molecule to disconnect", interactive=True)
+                    candidate = gr.Dropdown([], label="Proposed cut", interactive=True)
+                    custom = gr.Textbox("", label="Or precursors by hand", placeholder="SMILES.SMILES", max_lines=1)
+                    with gr.Row():
+                        check_cut = gr.Button("Check this cut")
+                        add_cut = gr.Button("Add to plan", variant="primary")
+                        check_stock = gr.Button("Is it in stock?")
+                    verdict = gr.HTML(render.wrap(""), apply_default_css=False)
+                    plan_view = gr.HTML(render.plan_panel("", {}, {}), apply_default_css=False)
                 with gr.Tab("Tools"):
                     tool = gr.Dropdown([], label="Tool", interactive=True)
                     arguments = gr.Code("{}", language="json", label="Arguments", lines=6)
                     run = gr.Button("Run tool")
                     result = gr.Code("", language="json", label="Result", lines=12, interactive=False)
                 with gr.Tab("Submit"):
+                    from_plan = gr.Button("Fill from the plan")
                     submission = gr.Code("", language="json", label="emit_routes submission", lines=16)
                     emit = gr.Button("Emit routes and score", variant="primary")
                     score = gr.HTML(render.score_panel(None), apply_default_css=False)
@@ -225,29 +333,77 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                 return "{}"
             return json.dumps(_arguments_template(name, state.opening["target_smiles"]), indent=2)
 
-        def on_run(state: PlaygroundSession, name: str, text: str):
+        def on_run(state: PlaygroundSession, name: str, text: str, keep: str):
             try:
                 args = json.loads(text or "{}")
             except json.JSONDecodeError as exc:
                 raise gr.Error(f"Arguments are not valid JSON: {exc}") from exc
             value = state.call(name, args)
-            return (state, json.dumps(value, indent=2, sort_keys=True), *panels(state))
+            return (state, json.dumps(value, indent=2, sort_keys=True), *panels(state, keep))
 
-        def on_emit(state: PlaygroundSession, text: str):
+        def on_emit(state: PlaygroundSession, text: str, keep: str):
             try:
                 value = json.loads(text or "{}")
             except json.JSONDecodeError as exc:
                 raise gr.Error(f"Submission is not valid JSON: {exc}") from exc
             state.call("emit_routes", {"submission": value})
-            return (state, *panels(state))
+            return (state, *panels(state, keep))
 
+        def _precursors(chosen: str, typed: str) -> list[str]:
+            raw = (typed or chosen or "").strip()
+            parts = [piece.strip() for piece in raw.split(".") if piece.strip()]
+            if not parts:
+                raise gr.Error("Choose a proposed cut, or type the precursors.")
+            return parts
+
+        def on_frontier(product: str):
+            return gr.update(choices=cut_choices(product), value=None)
+
+        def on_check_cut(state: PlaygroundSession, product: str, chosen: str, typed: str):
+            if not product:
+                raise gr.Error("Start an episode first.")
+            value = state.call(
+                "validate_disconnection", {"product_smiles": product, "reactants": _precursors(chosen, typed)}
+            )
+            return (state, render.verdict_panel(value), *panels(state, product, chosen))
+
+        def on_check_stock(state: PlaygroundSession, product: str, chosen: str, typed: str):
+            if not product:
+                raise gr.Error("Start an episode first.")
+            found = []
+            for smiles in _precursors(chosen, typed):
+                found.append((smiles, state.call("stock_retrieve", {"query": smiles, "mode": "exact", "limit": 1})))
+            return (state, render.stock_panel(found), *panels(state, product, chosen))
+
+        def on_add_cut(state: PlaygroundSession, product: str, chosen: str, typed: str):
+            if not product:
+                raise gr.Error("Start an episode first.")
+            try:
+                state.plan[canonicalize_smiles(product)] = tuple(
+                    canonicalize_smiles(piece) for piece in _precursors(chosen, typed)
+                )
+            except ChemistryError as exc:
+                raise gr.Error(f"Not a readable SMILES: {exc}") from exc
+            return (state, render.wrap(""), *panels(state))
+
+        def on_from_plan(state: PlaygroundSession):
+            if not state.opening:
+                raise gr.Error("Start an episode first.")
+            return json.dumps(state.build_submission(), indent=2)
+
+        plan_outputs = [target, history, score, routes, plan_view, frontier, candidate]
         split.change(on_split, split, task)
         start.click(
             on_start,
             [session, split, task],
-            [session, target, history, score, routes, tool, arguments, result, submission],
+            [session, *plan_outputs, tool, arguments, result, submission],
         )
         tool.change(on_tool, [session, tool], arguments)
-        run.click(on_run, [session, tool, arguments], [session, result, target, history, score, routes])
-        emit.click(on_emit, [session, submission], [session, target, history, score, routes])
+        run.click(on_run, [session, tool, arguments, frontier], [session, result, *plan_outputs])
+        emit.click(on_emit, [session, submission, frontier], [session, *plan_outputs])
+        frontier.change(on_frontier, frontier, candidate)
+        check_cut.click(on_check_cut, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])
+        check_stock.click(on_check_stock, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])
+        add_cut.click(on_add_cut, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])
+        from_plan.click(on_from_plan, session, submission)
     return demo
