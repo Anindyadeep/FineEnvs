@@ -46,6 +46,7 @@ def arguments(description=__doc__, output="runs/rl/sync_grpo"):
         default=0.5,
         help="Scale on a failed submission's grade; 1.0 trains on the grade",
     )
+    parser.add_argument("--inflight", type=int, default=32, help="AsyncGRPO: episodes in flight against vLLM")
     parser.add_argument("--space-id", help="Optional Trackio Space; local logs are always kept")
     return parser.parse_args()
 

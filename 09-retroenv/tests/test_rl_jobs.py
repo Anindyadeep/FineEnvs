@@ -134,3 +134,22 @@ def test_tool_results_count_down_the_budget_and_the_trace_records_each_episode(m
     ]
     assert env.submitted and env.passed and not env.failed
     assert all(r["failure"] is None for r in records)  # unsubmitted and solved episodes carry no grader failure
+
+
+def test_larger_flavors_split_the_gpus_and_watch_runs_on_cpu(monkeypatch, capsys):
+    plan = _plan(
+        monkeypatch, capsys, "train", "--mode", "async", "--name", "a", "--bucket", "o/b", "--flavor", "h200x4",
+        "--vllm-gpus", "2",
+    )  # fmt: skip
+    assert plan["flavor"] == "h200x4" and plan["command"][-2:] == ["--vllm-gpus", "2"]
+    assert _plan(monkeypatch, capsys, "eval", "--name", "e", "--bucket", "o/b")["flavor"] == "h200"
+    watch = _plan(monkeypatch, capsys, "watch", "--run", "a", "--job", "j1", "--bucket", "o/b")
+    assert watch["flavor"] == "cpu-basic" and watch["name"] == "a-evals" and watch["timeout"] == "30h"
+    assert "eval_watch.py --run a --job j1 --bucket o/b" in watch["command"][-1]
+    with pytest.raises(SystemExit):
+        _plan(monkeypatch, capsys, "watch", "--run", "a", "--bucket", "o/b")  # no training job to follow
+
+
+def test_the_fsdp2_config_reaches_the_job():
+    files = {path.relative_to(ROOT).as_posix() for path in _launcher().source_files()}
+    assert "train/jobs/fsdp2.yaml" in files and "train/jobs/eval_watch.py" in files

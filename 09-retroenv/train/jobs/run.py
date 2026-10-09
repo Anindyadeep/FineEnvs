@@ -1,8 +1,10 @@
 """Start the RetroEnv server and vLLM on a two-GPU machine, then train or evaluate.
 
 Training logic lives in train/sync_grpo.py and train/async_grpo.py; evaluation is the board's
-own eval/evaluate.py pointed at vLLM. GPU 0 serves the model, GPU 1 trains; evaluation serves
-two replicas, one per GPU. The RetroEnv server runs on CPU from the project's own environment.
+own eval/evaluate.py pointed at vLLM. In training, the first half of the GPUs (--vllm-gpus)
+serve the model, one vLLM replica each, and the rest train; more than one training GPU runs
+under FSDP2 (train/jobs/fsdp2.yaml). Evaluation serves a replica on every GPU. The RetroEnv
+server runs on CPU from the project's own environment.
 """
 
 import argparse
@@ -38,6 +40,8 @@ def main():
     parser.add_argument("--tasks", type=int, help="For eval: only the first N tasks")
     parser.add_argument("--concurrency", type=int, default=16, help="For eval: episodes at once")
     parser.add_argument("--label", help="For eval: the name on the board")
+    parser.add_argument("--vllm-gpus", type=int, help="For train: GPUs serving vLLM (default: half)")
+    parser.add_argument("--inflight", type=int, help="For async train: episodes in flight (default: 32 per replica)")
     parser.add_argument("--space-id")
     args = parser.parse_args()
     os.chdir(ROOT)
@@ -51,9 +55,17 @@ def main():
     for name, python in (("packages-train.txt", TRAIN_PYTHON), ("packages-env.txt", ENV_PYTHON)):
         with (output / name).open("w") as packages:
             subprocess.run(["uv", "pip", "freeze", "--python", python], stdout=packages, check=True)
-    devices = os.environ.get("CUDA_VISIBLE_DEVICES", "0,1").split(",")
-    if len(devices) < 2:
-        raise RuntimeError("Allocate two GPUs")
+    visible = os.environ.get("CUDA_VISIBLE_DEVICES") or subprocess.run(
+        ["nvidia-smi", "--query-gpu=index", "--format=csv,noheader"], capture_output=True, text=True, check=True
+    ).stdout.replace("\n", ",")
+    devices = [d.strip() for d in visible.split(",") if d.strip()]
+    if args.action == "train":
+        serving = args.vllm_gpus or max(1, len(devices) // 2)
+        if not 0 < serving < len(devices):
+            raise RuntimeError(f"Training needs a GPU for vLLM and one for the trainer; have {len(devices)}")
+        vllm_devices, train_devices = devices[:serving], devices[serving:]
+    else:
+        vllm_devices, train_devices = devices, []
     env = dict(
         os.environ,
         PYTHONUNBUFFERED="1",
@@ -146,20 +158,27 @@ def main():
                 {"CUDA_VISIBLE_DEVICES": ""},
             )  # fmt: skip
         command = [TRAIN_PYTHON, "train/jobs/serve_model.py", "--model", args.model, "--output", str(output)]
-        command += ["--port", str(engine_port)]
+        command += ["--port", str(engine_port), "--data-parallel-size", str(len(vllm_devices))]
         if args.action == "eval":
             command += ["--eval"] + (["--checkpoint", str(weights)] if weights else [])
         else:
             command += ["--trainer", args.mode]
-        spawn(
-            command, "vllm", {"CUDA_VISIBLE_DEVICES": devices[0] if args.action == "train" else ",".join(devices[:2])}
-        )
+        spawn(command, "vllm", {"CUDA_VISIBLE_DEVICES": ",".join(vllm_devices)})
         wait(server_url + "/health")
         wait(engine_url + "/health")
 
         if args.action == "train":
+            # One training GPU runs the script directly; several run it under FSDP2.
+            launcher = [TRAIN_PYTHON, "-m"]
+            if len(train_devices) > 1:
+                launcher = [
+                    TRAIN_PYTHON, "-m", "accelerate.commands.launch",
+                    "--config_file", "train/jobs/fsdp2.yaml",
+                    "--num_processes", str(len(train_devices)),
+                    "--module",
+                ]  # fmt: skip
             command = [
-                TRAIN_PYTHON, "-m", f"train.{args.mode}_grpo",
+                *launcher, f"train.{args.mode}_grpo",
                 "--model", args.model,
                 "--server", server_url,
                 "--vllm-url", engine_url,
@@ -168,10 +187,14 @@ def main():
                 "--save-steps", str(args.save_steps),
                 "--max-depth", str(args.max_depth),
             ]  # fmt: skip
+            command += ["--inflight", str(args.inflight or 32 * len(vllm_devices))]
             command += ["--smoke"] if args.smoke else []
             command += ["--space-id", args.space_id] if args.space_id else []
             # One JSON line per graded episode: task, reward, whether it submitted, tool calls.
-            trace = {"CUDA_VISIBLE_DEVICES": devices[1], "RETROENV_TRACE_PATH": str(output / "episodes.jsonl")}
+            trace = {
+                "CUDA_VISIBLE_DEVICES": ",".join(train_devices),
+                "RETROENV_TRACE_PATH": str(output / "episodes.jsonl"),
+            }
             run(command, "train", trace)
         else:
             # The board's evaluator and protocol, with vLLM as the provider.

@@ -15,7 +15,8 @@ def main():
     parser.add_argument("--checkpoint", help="Serve these (merged) weights under the base model's name")
     parser.add_argument("--output", required=True)
     parser.add_argument("--port", type=int, default=8001)
-    parser.add_argument("--eval", action="store_true", help="Two data-parallel replicas, prefix caching on")
+    parser.add_argument("--eval", action="store_true", help="Serve for evaluation: no weight updates")
+    parser.add_argument("--data-parallel-size", type=int, default=1, help="Replicas, one per visible GPU")
     parser.add_argument("--trainer", choices=["sync", "async"], default="sync", help="Which trainer syncs weights")
     args = parser.parse_args()
     output = Path(args.output)
@@ -29,7 +30,7 @@ def main():
         "--port", str(args.port),
         "--served-model-name", args.model,
         "--tensor-parallel-size", "1",
-        "--data-parallel-size", "2" if args.eval else "1",
+        "--data-parallel-size", str(args.data_parallel_size),
         "--dtype", "bfloat16",
         "--max-model-len", "65536",
         "--gpu-memory-utilization", "0.85",
@@ -50,16 +51,16 @@ def main():
     if not args.eval:
         # Training: the trainer pushes weights over NCCL after each step, and the token ids and
         # logprobs come back with every completion. CUDA graphs stay on: in eager mode a 27B
-        # turn took about 11 s. GRPOTrainer resets the prefix cache after every weight update, so
-        # each turn reuses the episode's context; AsyncGRPO pauses and resumes generation around
-        # an update without resetting it, so there the cache stays off.
+        # turn took about 11 s. Prefix caching stays on too: every turn resends the episode so
+        # far, and without the cache AsyncGRPO spent most of its time re-reading 5-12k-token
+        # contexts (about 250 generated tokens/s). GRPOTrainer resets the cache after each weight
+        # update; AsyncGRPO does not, which is sound because it trains against the log-probs
+        # vLLM reports, whatever weights computed the cached prefix.
         command += [
             "--weight-transfer-config", '{"backend":"nccl"}',
             "--logprobs-mode", "processed_logprobs",
             "--return-tokens-as-token-ids",
         ]  # fmt: skip
-        if args.trainer == "async":
-            command += ["--no-enable-prefix-caching"]
         os.environ["VLLM_SERVER_DEV_MODE"] = "1"
     os.execvp(command[0], command)
 

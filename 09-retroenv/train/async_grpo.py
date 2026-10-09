@@ -51,7 +51,7 @@ def main():
         epsilon_high=0.28,
         chat_template_kwargs={"enable_thinking": False, "preserve_thinking": True},
         # Episodes in flight against vLLM and the server, and how stale a trained episode may be.
-        max_inflight_tasks=4 if args.smoke else 32,
+        max_inflight_tasks=4 if args.smoke else args.inflight,  # run.py sets 32 per vLLM replica
         max_staleness=4,
         token_budget=40960,  # tokens packed into one forward pass
         fork_threshold_tokens=0,

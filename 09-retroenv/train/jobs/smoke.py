@@ -18,12 +18,14 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--tasks", type=int, default=2)
     parser.add_argument("--space-id")
+    parser.add_argument("--vllm-gpus", type=int)
     args, _ = parser.parse_known_args()  # the launcher's shared options are ignored here
     output = Path(args.output).resolve()
     train, evaluation = output / "train", output / "reload-eval"
     common = ["--mode", args.mode, "--model", args.model] + (["--space-id", args.space_id] if args.space_id else [])
     run = [sys.executable, str(ROOT / "train/jobs/run.py")]
-    subprocess.run([*run, "train", *common, "--smoke", "--output", str(train)], check=True, cwd=ROOT)
+    layout = ["--vllm-gpus", str(args.vllm_gpus)] if args.vllm_gpus else []
+    subprocess.run([*run, "train", *common, *layout, "--smoke", "--output", str(train)], check=True, cwd=ROOT)
 
     for step in (1, 2):
         path = train / f"checkpoint-{step}"
