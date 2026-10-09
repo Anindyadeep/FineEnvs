@@ -106,8 +106,10 @@ def main():
                 curve = scratch / "evals.md"
                 curve.write_text(f"# {args.run} on {args.set}\n\n" + table(finished, base))
                 hub.batch_bucket_files(args.bucket, add=[(str(curve), f"{args.run}/evals.md")])
-        if training in DONE and len(finished) == len(submitted) and not set(checkpoints(args.bucket, args.run)) - set(
-            submitted
+        if (
+            training in DONE
+            and len(finished) == len(submitted)
+            and not set(checkpoints(args.bucket, args.run)) - set(submitted)
         ):
             print(table(finished, base), flush=True)
             return

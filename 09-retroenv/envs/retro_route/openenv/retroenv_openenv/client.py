@@ -341,10 +341,22 @@ class RemoteRetroRouteEnv:
             "search_literature", product_smiles=product_smiles, reaction_class=reaction_class, limit=limit
         )
 
+    # TRL shows the model this docstring as the tool's schema, where evaluation shows the server's
+    # JSON schema. With only a one-line description, a quarter of training submissions had no
+    # route starting at the target (2 of 30 in evaluation), so it says what that schema says.
     def emit_routes(self, submission: dict) -> str:
-        """Submit the final route trees and end the episode.
+        """Submit the final route trees and end the episode. Call it exactly once.
+
+        Each item of submission.routes is a root molecule node for the target itself, never
+        wrapped in route, root or tree keys, and its smiles is the target exactly as given. A
+        molecule node is {"type": "mol", "smiles": "...", "in_stock": false, "children": [...]}:
+        an expanded molecule has in_stock false and exactly one reaction child; a leaf has no
+        children and in_stock true only if stock_retrieve confirmed it. A reaction node is
+        {"type": "reaction", "is_reaction": true, "metadata": {...}, "children": [...]}, whose
+        children are its precursor molecule nodes and whose metadata holds explanation,
+        reaction_class, confidence (0 to 1), literature (a list) and precursor_roles (an object).
 
         Args:
-            submission: {"routes": [root molecule nodes]} in retro-route-graph-v1 form.
+            submission: {"routes": [root molecule nodes]}, as described above; an object, not a string.
         """
         return self._call("emit_routes", submission=submission)

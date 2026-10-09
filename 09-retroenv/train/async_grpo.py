@@ -55,7 +55,7 @@ def main():
         max_staleness=4,
         token_budget=40960,  # tokens packed into one forward pass
         fork_threshold_tokens=0,
-        optim="paged_adamw_8bit",
+        optim="adamw_torch_fused",  # LoRA state is small; bitsandbytes 8-bit Adam rejects FSDP2 tensors
         bf16=True,
         dtype="bfloat16",  # vLLM serves bf16 too; the default float32 would double the trainer's memory
         model_init_kwargs={"revision": MODEL_REVISIONS[args.model]},

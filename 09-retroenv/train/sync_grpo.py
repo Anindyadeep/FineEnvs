@@ -183,7 +183,7 @@ def main():
         reward_weights=[0.0, 0.0],  # solved and submitted are logged only; TrainingEnv adds the reward
         chat_template_kwargs={"enable_thinking": False, "preserve_thinking": True},
         generation_kwargs={"max_tokens": 4096},  # per model turn
-        optim="paged_adamw_8bit",
+        optim="adamw_torch_fused",  # LoRA state is small; bitsandbytes 8-bit Adam rejects FSDP2 tensors
         bf16=True,
         model_init_kwargs={"dtype": "bfloat16", "revision": MODEL_REVISIONS[args.model]},
         gradient_checkpointing=True,
