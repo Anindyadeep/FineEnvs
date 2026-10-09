@@ -35,7 +35,7 @@ def arguments(description=__doc__, output="runs/rl/sync_grpo"):
     parser.add_argument("--server", default="http://127.0.0.1:8000", help="RetroEnv server")
     parser.add_argument("--vllm-url", default="http://127.0.0.1:8001")
     parser.add_argument("--output", default=output)
-    parser.add_argument("--smoke", action="store_true", help="Two updates, two rollouts per group")
+    parser.add_argument("--smoke", action="store_true", help="Two updates of one task, four rollouts each")
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--max-depth", type=int, default=4, help="Train on tasks with at most this depth budget")
@@ -123,8 +123,8 @@ def main():
         max_steps=2 if args.smoke else args.steps,
         # One optimizer step sees 16 episodes: two tasks, eight attempts each.
         per_device_train_batch_size=1,
-        gradient_accumulation_steps=2 if args.smoke else 16,
-        num_generations=2 if args.smoke else 8,
+        gradient_accumulation_steps=4 if args.smoke else 16,
+        num_generations=4 if args.smoke else 8,
         max_completion_length=16384,  # every turn of the episode, tool results included
         max_tool_calling_iterations=16,  # the board's 16 model turns; the server caps tools at 32
         temperature=0.8,

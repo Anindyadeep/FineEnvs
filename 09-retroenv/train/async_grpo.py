@@ -36,8 +36,8 @@ def main():
         max_steps=2 if args.smoke else args.steps,
         # One optimizer step sees 16 episodes, as in sync_grpo.py: two tasks, eight attempts each.
         per_device_train_batch_size=1 if args.smoke else 4,
-        gradient_accumulation_steps=2 if args.smoke else 4,
-        num_generations=2 if args.smoke else 8,
+        gradient_accumulation_steps=4 if args.smoke else 4,
+        num_generations=4 if args.smoke else 8,
         max_completion_length=16384,
         max_tool_calling_iterations=16,
         temperature=0.8,
