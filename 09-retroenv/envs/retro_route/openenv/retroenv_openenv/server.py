@@ -2,12 +2,15 @@
 
 import os
 
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from openenv.core.env_server.http_server import create_app
 from openenv.core.env_server.mcp_types import CallToolAction, CallToolObservation
 from rdkit import RDLogger
 
 from .config import ENV_NAME
 from .environment import RetroRouteEnvironment
+from .molecule3d import STATIC, viewer_page
 
 # Agents send unparsable SMILES all the time; the verifier reports them, so
 # RDKit's per-molecule stderr messages are only noise in the server log.
@@ -31,3 +34,12 @@ app = create_app(
     show_default_tab=False,
     title_override="RetroEnv",
 )
+
+# The playground's 3D view: a conformer page per SMILES, and the vendored 3Dmol.js it loads.
+app.mount("/molecule/static", StaticFiles(directory=STATIC), name="molecule-static")
+
+
+@app.get("/molecule/3d", response_class=HTMLResponse, include_in_schema=False)
+def molecule_3d(smiles: str) -> HTMLResponse:
+    # A given SMILES always yields the same conformer, so browsers may keep it.
+    return HTMLResponse(viewer_page(smiles), headers={"Cache-Control": "public, max-age=86400"})

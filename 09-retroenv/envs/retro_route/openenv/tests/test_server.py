@@ -65,3 +65,13 @@ def test_concurrent_sessions_are_isolated(server_url):
 def test_playground_is_mounted(server_url):
     response = httpx.get(f"{server_url}/web/", follow_redirects=True, timeout=30)
     assert response.status_code == 200 and "RetroEnv" in response.text
+
+
+def test_the_3d_view_serves_a_conformer_and_the_vendored_viewer(server_url):
+    page = httpx.get(f"{server_url}/molecule/3d", params={"smiles": "CC(=O)Nc1ccc(O)cc1"})
+    assert page.status_code == 200 and "text/html" in page.headers["content-type"]
+    assert "V2000" in page.text and "/molecule/static/3Dmol-min.js" in page.text
+    script = httpx.get(f"{server_url}/molecule/static/3Dmol-min.js")
+    assert script.status_code == 200 and len(script.content) > 100_000
+    unparsable = httpx.get(f"{server_url}/molecule/3d", params={"smiles": "not a molecule"})
+    assert unparsable.status_code == 200 and "No 3D conformer" in unparsable.text

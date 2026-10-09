@@ -231,7 +231,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
 
     def panels(
         session: PlaygroundSession, keep: str = "", keep_cut: str = ""
-    ) -> tuple[str, str, str, str, str, Any, Any]:
+    ) -> tuple[str, str, str, str, str, Any, Any, Any]:
         """Every live panel. ``keep`` holds the molecule under study while it still needs cutting,
         and ``keep_cut`` the proposed cut, so checking one does not make you choose it again."""
         state = session.env.state if session.env else None
@@ -249,6 +249,8 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             gr.update(choices=frontier, value=chosen),
             # Gradio fires .change only on user input, so the cuts are refreshed here too.
             gr.update(choices=cuts, value=keep_cut if still_offered else None),
+            # Redrawing an unchanged molecule would reload its 3D view on every tool call.
+            render.molecule_views(chosen) if chosen != keep else gr.update(),
         )
 
     def cut_choices(product: str) -> list[tuple[str, str]]:
@@ -277,6 +279,11 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                 split = gr.Dropdown(splits, value=default_split, label="Split")
                 task = gr.Dropdown(task_choices(default_split), value=0, label="Task")
                 start = gr.Button("Start episode", variant="primary")
+                with gr.Tabs():
+                    with gr.Tab("2D"):
+                        target_2d = gr.HTML(render.structure_2d(None), apply_default_css=False)
+                    with gr.Tab("3D"):
+                        target_3d = gr.HTML(render.structure_3d(None), apply_default_css=False)
                 target = gr.HTML(render.target_panel(None), apply_default_css=False)
             with gr.Column(scale=7, min_width=360):
                 with gr.Tab("Plan"):
@@ -289,6 +296,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                         apply_default_css=False,
                     )
                     frontier = gr.Dropdown([], label="Molecule to disconnect", interactive=True)
+                    selected = gr.HTML(render.molecule_views(None), apply_default_css=False)
                     candidate = gr.Dropdown([], label="Proposed cut", interactive=True)
                     custom = gr.Textbox("", label="Or precursors by hand", placeholder="SMILES.SMILES", max_lines=1)
                     with gr.Row():
@@ -321,6 +329,8 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             first = names[0] if names else None
             return (
                 state,
+                render.structure_2d(target_smiles),
+                render.structure_3d(target_smiles),
                 *panels(state),
                 gr.update(choices=names, value=first),
                 json.dumps(_arguments_template(first, target_smiles), indent=2) if first else "{}",
@@ -357,7 +367,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             return parts
 
         def on_frontier(product: str):
-            return gr.update(choices=cut_choices(product), value=None)
+            return gr.update(choices=cut_choices(product), value=None), render.molecule_views(product)
 
         def on_check_cut(state: PlaygroundSession, product: str, chosen: str, typed: str):
             if not product:
@@ -391,17 +401,17 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                 raise gr.Error("Start an episode first.")
             return json.dumps(state.build_submission(), indent=2)
 
-        plan_outputs = [target, history, score, routes, plan_view, frontier, candidate]
+        plan_outputs = [target, history, score, routes, plan_view, frontier, candidate, selected]
         split.change(on_split, split, task)
         start.click(
             on_start,
             [session, split, task],
-            [session, *plan_outputs, tool, arguments, result, submission],
+            [session, target_2d, target_3d, *plan_outputs, tool, arguments, result, submission],
         )
         tool.change(on_tool, [session, tool], arguments)
         run.click(on_run, [session, tool, arguments, frontier], [session, result, *plan_outputs])
         emit.click(on_emit, [session, submission, frontier], [session, *plan_outputs])
-        frontier.change(on_frontier, frontier, candidate)
+        frontier.input(on_frontier, frontier, [candidate, selected])
         check_cut.click(on_check_cut, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])
         check_stock.click(on_check_stock, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])
         add_cut.click(on_add_cut, [session, frontier, candidate, custom], [session, verdict, *plan_outputs])

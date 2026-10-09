@@ -5,6 +5,7 @@ from __future__ import annotations
 import html
 from functools import lru_cache
 from typing import Any
+from urllib.parse import quote
 
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
@@ -37,13 +38,34 @@ footer { display: none !important; }
   margin-right: 5px; vertical-align: 1px; background: var(--body-text-color-subdued); }
 .gradio-container .retro .dot.ok { background: #15803d; }
 .gradio-container .retro .dot.bad { background: #c2410c; }
+.gradio-container .retro .views { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.gradio-container .retro .views .mol { display: block; }
+.gradio-container .retro .views .mol svg { width: 100%; height: auto; }
+.gradio-container .retro .frame { border: 1px solid var(--border-color-primary); border-radius: 6px; padding: 4px; }
+.gradio-container .retro .frame iframe { display: block; width: 100%; border: 0; background: transparent; }
+.gradio-container .retro .caption { margin: 2px 0 6px; color: var(--body-text-color-subdued); font-size: 12px; }
 </style>
 """
 
 
+# Heteroatoms in mid-tone element colours that read on light and dark backgrounds; carbon
+# and every bond stay black in the SVG and are then switched to the page's text colour.
+ATOM_COLOURS = {
+    5: (0.83, 0.48, 0.48),  # B
+    7: (0.24, 0.44, 0.85),  # N
+    8: (0.88, 0.28, 0.23),  # O
+    9: (0.23, 0.65, 0.33),  # F
+    15: (0.88, 0.54, 0.12),  # P
+    16: (0.79, 0.64, 0.15),  # S
+    17: (0.23, 0.65, 0.33),  # Cl
+    35: (0.71, 0.40, 0.23),  # Br
+    53: (0.56, 0.36, 0.71),  # I
+}
+
+
 @lru_cache(maxsize=512)
 def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
-    """Monochrome drawing; strokes and glyphs take currentColor so the page theme colours them."""
+    """A 2D drawing whose bonds follow the page theme and whose heteroatoms keep element colours."""
     mol = Chem.MolFromSmiles(smiles)
     if mol is None:
         return '<span class="muted">unparsable SMILES</span>'
@@ -53,6 +75,7 @@ def molecule_svg(smiles: str, width: int = 240, height: int = 160) -> str:
     options.padding = 0.08
     options.bondLineWidth = 1.4
     options.useBWAtomPalette()
+    options.updateAtomPalette(ATOM_COLOURS)
     drawer.DrawMolecule(mol)
     drawer.FinishDrawing()
     svg = drawer.GetDrawingText().replace("#000000", "currentColor")
@@ -83,7 +106,36 @@ def target_panel(opening: dict[str, Any] | None, state: Any = None) -> str:
     ]
     if state is not None and state.done:
         rows.append(("Reward", f"{state.reward:.3f}" if state.reward is not None else "not scored"))
-    return wrap(molecule_svg(opening["target_smiles"], 300, 200) + key_values(rows))
+    return wrap(key_values(rows))
+
+
+def structure_2d(smiles: str | None, width: int = 420, height: int = 280) -> str:
+    if not smiles:
+        return wrap('<p class="muted">Start an episode to see the target.</p>')
+    return wrap(f'<div class="views">{molecule_svg(smiles, width, height)}</div>')
+
+
+def structure_3d(smiles: str | None, height: int = 300) -> str:
+    """The 3D view: an iframe onto the server's conformer page, loaded when it is shown."""
+    if not smiles:
+        return wrap('<p class="muted">Start an episode to see the target.</p>')
+    return wrap(
+        f'<div class="frame"><iframe title="3D structure" loading="lazy" height="{height}" '
+        f'src="/molecule/3d?smiles={quote(smiles, safe="")}"></iframe></div>'
+        '<p class="caption">One RDKit conformer (ETKDG, then MMFF), for shape only.</p>'
+    )
+
+
+def molecule_views(smiles: str | None) -> str:
+    """The molecule under study, 2D beside 3D."""
+    if not smiles:
+        return wrap("")
+    return wrap(
+        f'<p class="caption mono">{html.escape(smiles)}</p>'
+        f'<div class="views">{molecule_svg(smiles, 360, 240)}'
+        f'<div class="frame"><iframe title="3D structure" loading="lazy" height="240" '
+        f'src="/molecule/3d?smiles={quote(smiles, safe="")}"></iframe></div></div>'
+    )
 
 
 def _route_node(node: Any, depth: int = 0) -> str:
