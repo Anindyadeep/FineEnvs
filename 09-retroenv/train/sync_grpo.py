@@ -77,7 +77,10 @@ def task_dataset(server, max_depth, seed=0):
 #
 # RemoteRetroRouteEnv holds one WebSocket session per rollout. Each method calls the tool of
 # the same name on the server; `emit_routes` ends the episode and the server's grade becomes
-# `get_reward()`. An episode that never submits scores 0, as it does in evaluation.
+# `get_reward()`. An episode that never submits scores 0, as it does in evaluation. Every tool
+# result reports the calls left in the server's budget and, near the end, reminds the model to
+# submit: evaluation tells the model its turns left too, and without it most rollouts researched
+# until the loop ended, so whole groups tied at 0 and gave no gradient.
 def environment_factory(server):
     from retroenv_openenv.client import RemoteRetroRouteEnv
 
@@ -126,7 +129,9 @@ def main():
         gradient_accumulation_steps=4 if args.smoke else 16,
         num_generations=4 if args.smoke else 8,
         max_completion_length=16384,  # every turn of the episode, tool results included
-        max_tool_calling_iterations=16,  # the board's 16 model turns; the server caps tools at 32
+        # The prompt gives the board's 16 turns; training allows 20, so a rollout that overruns
+        # can still submit (evaluation forces emit_routes on its last turn instead).
+        max_tool_calling_iterations=20,
         temperature=0.8,
         top_p=1.0,
         top_k=0,

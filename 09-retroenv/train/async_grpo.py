@@ -39,7 +39,7 @@ def main():
         gradient_accumulation_steps=4 if args.smoke else 4,
         num_generations=4 if args.smoke else 8,
         max_completion_length=16384,
-        max_tool_calling_iterations=16,
+        max_tool_calling_iterations=20,  # 16 in the prompt, 4 to spare for the submission
         temperature=0.8,
         top_p=1.0,
         top_k=-1,

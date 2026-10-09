@@ -59,6 +59,13 @@ the reward. An episode that never submits scores 0, as in evaluation; one whose 
 scores NaN and stays out of its group's baseline. The default curriculum is the 51,358 standard
 train tasks with a depth budget of 4 (`--max-depth`).
 
+Evaluation tells the model its turns left and forces `emit_routes` on the last one; TRL's tool
+loop does neither. Without a substitute, most rollouts researched until the loop ended and never
+submitted, so whole groups tied at 0 and gave no gradient. So every tool result carries the
+calls left in the server's 32-call budget and, with four left, a reminder to submit; the prompt
+keeps the board's 16 turns and training allows 20, so an overrun can still submit. Each graded
+episode is appended to `episodes.jsonl` in the run directory (task, reward, submitted, tool calls).
+
 [jobs/](jobs) runs them on HF Jobs the way `05-multi-harness-rl/jobs` does, on `h200x2`: vLLM
 serves the model on one GPU, the trainer runs on the other, and the RetroEnv server runs on CPU
 from the project's locked environment, preparing its serving snapshot from the public bucket
@@ -77,8 +84,8 @@ python train/jobs/hf_job.py eval --name base-eval --bucket $B --submit          
 Without `--submit` the launcher prints the job plan. `check_setup.py` runs first in every job and
 fails before the GPUs load anything if TRL cannot train through the model's chat template, a
 tool call does not round-trip through it, or a tool's docstring does not become a schema. The
-smoke test runs two updates, checks both checkpoints, then merges checkpoint 2 and evaluates
-it on two tasks. Evaluation merges the adapter into the base weights (`jobs/merge_lora.py`),
+smoke test runs two updates of four rollouts each, requires a non-zero gradient and episode
+traces, checks both checkpoints, then merges checkpoint 2 and evaluates it on two tasks. Evaluation merges the adapter into the base weights (`jobs/merge_lora.py`),
 serves them with vLLM and runs `eval/evaluate.py` with the board's protocol, so its RESULTS.md
 lines up with `runs/core30-nothink`.
 

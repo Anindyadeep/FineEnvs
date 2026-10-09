@@ -29,7 +29,7 @@ def _plan(monkeypatch, capsys, *argv):
 
 def test_the_plan_runs_one_entrypoint_action_on_two_h200s(monkeypatch, capsys):
     plan = _plan(monkeypatch, capsys, "train", "--mode", "async", "--name", "a", "--bucket", "o/b", "--steps", "100")
-    assert plan["flavor"] == "h200x2" and plan["namespace"] == "o" and plan["timeout"] == "12h"
+    assert plan["flavor"] == "h200x2" and plan["namespace"] == "o" and plan["timeout"] == "24h"
     command = plan["command"]
     assert command[:3] == ["bash", "/source/train/jobs/entrypoint.sh", "train"]
     assert command[command.index("--mode") + 1] == "async" and command[command.index("--output") + 1] == "/outputs/a"
@@ -84,8 +84,17 @@ class _DeadClient:
 
 
 class _LiveClient(_DeadClient):
-    def reset(self, **_):
-        return {"prompt": "Plan a retrosynthesis for CCO."}
+    """A server with a three-call budget: tools answer, emit_routes grades 0.6."""
+
+    def reset(self, **kwargs):
+        return {"prompt": "Plan a retrosynthesis for CCO.", "task_id": "retro_x", "max_tool_calls": 3, **kwargs}
+
+    def call(self, name, arguments):
+        from retroenv_openenv.client import ToolOutcome
+
+        if name == "emit_routes":
+            return ToolOutcome(name=name, result={"score": {"valid": True}}, done=True, reward=0.6, error=None)
+        return ToolOutcome(name=name, result={"matches": []}, done=False, reward=None, error=None)
 
 
 def test_a_broken_session_scores_nan_and_the_next_reset_reconnects(monkeypatch):
@@ -99,3 +108,25 @@ def test_a_broken_session_scores_nan_and_the_next_reset_reconnects(monkeypatch):
     monkeypatch.setattr(client, "RetroEnvClient", _LiveClient)
     assert env.reset(index=3) == "Plan a retrosynthesis for CCO."  # a fresh session after the dead one
     assert env.get_reward() == 0.0
+
+
+def test_tool_results_count_down_the_budget_and_the_trace_records_each_episode(monkeypatch, tmp_path):
+    from retroenv_openenv import client
+
+    trace = tmp_path / "episodes.jsonl"
+    monkeypatch.setenv("RETROENV_TRACE_PATH", str(trace))
+    monkeypatch.setattr(client, "RetroEnvClient", _LiveClient)
+    env = client.RemoteRetroRouteEnv("http://server")
+    env.reset(index=0)
+    first = json.loads(env.stock_retrieve("CCO"))
+    assert first["tool_calls_remaining"] == 2 and "reminder" in first  # 2 left of 3, under REMIND_AT
+    assert env.get_reward() == 0.0  # no submission: 0, as in evaluation
+    env.reset(index=1)
+    env.inspect_molecule("CCO")
+    json.loads(env.emit_routes({"routes": []}))
+    assert env.get_reward() == 0.6
+    records = [json.loads(line) for line in trace.read_text().splitlines()]
+    assert [(r["index"], r["submitted"], r["tool_calls"], r["reward"]) for r in records] == [
+        (0, False, 1, 0.0),
+        (1, True, 1, 0.6),
+    ]

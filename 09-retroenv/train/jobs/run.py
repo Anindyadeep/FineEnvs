@@ -170,7 +170,9 @@ def main():
             ]  # fmt: skip
             command += ["--smoke"] if args.smoke else []
             command += ["--space-id", args.space_id] if args.space_id else []
-            run(command, "train", {"CUDA_VISIBLE_DEVICES": devices[1]})
+            # One JSON line per graded episode: task, reward, whether it submitted, tool calls.
+            trace = {"CUDA_VISIBLE_DEVICES": devices[1], "RETROENV_TRACE_PATH": str(output / "episodes.jsonl")}
+            run(command, "train", trace)
         else:
             # The board's evaluator and protocol, with vLLM as the provider.
             label = args.label or (f"{args.model} + {Path(args.checkpoint).name}" if args.checkpoint else args.model)

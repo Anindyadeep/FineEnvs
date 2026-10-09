@@ -50,7 +50,9 @@ def main():
     parser.add_argument("--name", required=True, help="Job name and output directory under /outputs")
     parser.add_argument("--bucket", required=True, help="An existing owner/bucket for checkpoints and logs")
     parser.add_argument("--flavor", help="Default: h200x2, or cpu-upgrade for check")
-    parser.add_argument("--timeout", help="Default: 12h for train, 4h otherwise")
+    parser.add_argument(
+        "--timeout", help="Default: 24h for train (100 sync steps on the 27B take about 13 h), 4h otherwise"
+    )
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--max-depth", type=int, default=4)
@@ -98,7 +100,7 @@ def main():
         "command": command,
         "namespace": namespace,
         "flavor": flavor,
-        "timeout": args.timeout or ("12h" if args.action == "train" else "4h"),
+        "timeout": args.timeout or ("24h" if args.action == "train" else "4h"),
         "name": args.name,
         "env": {"PYTHONUNBUFFERED": "1", "RETROENV_MODEL": args.model},
     }

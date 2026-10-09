@@ -39,6 +39,10 @@ def main():
     assert any(p.stat().st_size for p in (train / "trackio").rglob("*") if p.suffix in {".db", ".jsonl"}), (
         "No local Trackio metrics"
     )
+    # A run whose groups all tie trains nothing. Two steps of four rollouts must move the weights.
+    assert any(row.get("grad_norm", 0) > 0 for row in updates), f"Every update had zero gradient: {updates}"
+    episodes = [json.loads(line) for line in (train / "episodes.jsonl").read_text().splitlines() if line]
+    assert episodes, "No episode traces were written"
 
     checkpoint = train / "checkpoint-2"
     subprocess.run(
@@ -66,6 +70,9 @@ def main():
         "checkpoint": str(checkpoint),
         "optimizer_metrics": updates,
         "nonzero_gradient_updates": sum(row.get("grad_norm", 0) > 0 for row in updates),
+        "episodes": len(episodes),
+        "submitted": sum(e["submitted"] for e in episodes) / len(episodes),
+        "rewards": [e["reward"] for e in episodes],
         "eval": {key: summary.get(key) for key in ("tasks", "pass_at_1", "mean_reward", "mean_tool_calls")},
         "job": os.getenv("HF_JOB_ID") or os.getenv("JOB_ID"),
         "complete": True,

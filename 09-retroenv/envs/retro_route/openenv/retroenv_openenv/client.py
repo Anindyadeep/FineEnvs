@@ -145,31 +145,59 @@ class RemoteRetroRouteEnv:
 
     Public methods other than ``reset`` and ``get_reward`` are agent tools.
     Set ``RETROENV_SERVER`` and pass ``environment_factory=RemoteRetroRouteEnv``.
+
+    The evaluation harness tells the model how many turns it has left and reserves the last one
+    for ``emit_routes``; TRL's tool loop does neither, so a rollout tends to research until the
+    loop ends and never submits, and a group of unsubmitted rollouts ties at 0. Each tool result
+    here therefore carries the calls left in the server's budget, and a reminder to submit once
+    few remain. The reward is unchanged: the server's grade of the one submission.
+
+    With ``RETROENV_TRACE_PATH`` set, each graded episode appends one JSON line there (task,
+    reward, whether it submitted, tool calls), which says why a group was flat.
     """
+
+    REMIND_AT = 4  # tool calls left when the reminder to submit starts
 
     def __init__(self, server: str | None = None):
         import os
 
         self._server = server or os.environ["RETROENV_SERVER"]
+        self._trace = os.environ.get("RETROENV_TRACE_PATH")
         self._client = RetroEnvClient(self._server)
         self._reward = 0.0
         self._failed = False
+        self._opening: dict[str, Any] = {}
+        self._calls = 0
+        self._submitted = False
 
     def reset(self, split: str = "train", index: int = 0, **_: Any) -> str:
-        self._reward, self._failed = 0.0, False
+        self._reward, self._failed, self._calls, self._submitted = 0.0, False, 0, False
         try:
-            return self._client.reset(split=split, index=index)["prompt"]
+            self._opening = self._client.reset(split=split, index=index)
         except Exception:
             # A session the server dropped stays dead in the client, and every later call on it
             # fails; open a fresh one once instead of losing this instance for the whole run.
             self._close()
             self._client = RetroEnvClient(self._server)
-            return self._client.reset(split=split, index=index)["prompt"]
+            self._opening = self._client.reset(split=split, index=index)
+        return self._opening["prompt"]
 
     def get_reward(self) -> float:
         # A rollout whose session broke has no grade, which is not the same as a wrong answer:
         # NaN keeps it out of its group's baseline instead of scoring it 0.
-        return math.nan if self._failed else self._reward
+        reward = math.nan if self._failed else self._reward
+        if self._trace:
+            record = {
+                "task_id": self._opening.get("task_id"),
+                "index": self._opening.get("index"),
+                "reward": None if math.isnan(reward) else reward,
+                "submitted": self._submitted,
+                "tool_calls": self._calls,
+                "failed": self._failed,
+            }
+            with open(self._trace, "a", encoding="utf-8") as trace:
+                trace.write(json.dumps(record) + "\n")
+        return reward
 
     def _close(self) -> None:
         """Release the WebSocket session. TRL and the evaluators call this."""
@@ -187,6 +215,19 @@ class RemoteRetroRouteEnv:
         if outcome.reward is not None:
             self._reward = float(outcome.reward)
         payload = outcome.result if outcome.error is None else {"error": outcome.error}
+        if not isinstance(payload, dict):
+            payload = {"result": payload}
+        if name == "emit_routes":
+            self._submitted = True
+        else:
+            self._calls += 1
+            left = max(0, int(self._opening.get("max_tool_calls", 32)) - self._calls)
+            payload = {**payload, "tool_calls_remaining": left}
+            if left <= self.REMIND_AT:
+                payload["reminder"] = (
+                    "Few tool calls remain. Submit your best routes now with emit_routes; "
+                    "an episode that never calls it scores 0."
+                )
         return json.dumps(payload, sort_keys=True)
 
     def inspect_molecule(self, smiles: str) -> str:
