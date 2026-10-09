@@ -1,6 +1,6 @@
 # Evaluate a model
 
-`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The release is fully open: every split, test_id and test_hard included, ships its known routes, and the runs on 30 test_id tasks are under `runs/`. Use dev to pick checkpoints during training and report test_id and test_hard, so test scores never steer training.
+`run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The release is fully open: every split, test_id and test_hard included, ships its known routes, and the runs on 30 test_id tasks are under `runs/`. Use dev to pick checkpoints during training and report test_id and test_hard, so test scores never steer training. For a quick board, `--split final_eval` runs the 50-task subset of the two test splits (17 easy, 17 medium, 16 hard); it is served by a server started from the bucket snapshot (`envs/retro_route/openenv/start.sh`, then `--server http://127.0.0.1:8000`).
 
 ```bash
 uv sync --extra dev --extra eval
@@ -47,7 +47,7 @@ Three loops implement the same protocol: `agent.py` for OpenAI-compatible chat, 
 
 * The system prompt and task prompt are identical for every model. Each tool result reports the model turns left.
 * The final turn exposes only `emit_routes`. Claude Opus 5.5 and Sonnet 5.5 reject a forced `tool_choice`, so that turn says so in text, as it does whenever `tool_choice` is `auto`.
-* Two turns without a tool call trigger the final turn early. An episode that never calls `emit_routes` is closed with an empty route set, which scores the 0.05 floor.
+* Two turns without a tool call trigger the final turn early. An episode that never calls `emit_routes` is closed with an empty route set, which scores 0.
 * Claude runs at its default effort and thinking. GPT-5.6 runs at its default reasoning effort. Other models run at temperature 0.
 * Some models send `submission` as a JSON string, sometimes with one stray closing bracket. The harness decodes that and records `submission_coerced`; the server's verifier stays strict, so training still sees the error.
 * A refusal (Claude's `refusal` stop reason) counts as a failed episode. It is reported as `refusal_rate`, and requests are never re-routed to another model.

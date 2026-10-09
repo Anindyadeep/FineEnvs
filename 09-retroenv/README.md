@@ -15,18 +15,33 @@ evidence, not proof that a synthesis works in the lab.
 uv sync --extra dev --extra eval
 uv run pytest                                            # runs on tests/fixtures/mini-release
 
-# The release, fully open: https://huggingface.co/datasets/LiteFold/RetroEnv
-# (every split's tasks and known routes, stock, reaction library, eval runs)
-uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL
+# Serve the pinned snapshot from the FineEnvs bucket (230 MB once, then about 10 s per start)
+uv run bash envs/retro_route/openenv/start.sh            # http://localhost:8000/web/
+uv run python explorer/server.py                         # http://127.0.0.1:8050
+```
 
-# Or rebuild it from PaRoutes v2 (346 MB download, about an hour on 32 cores)
+| Artifact | Where |
+|---|---|
+| The release: every split's tasks and known routes, stock, reaction library, eval runs | [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) |
+| The serving copy: that release pinned, its serving index and `final_eval` | [FineEnvs/retroenv-bucket](https://huggingface.co/buckets/FineEnvs/retroenv-bucket) |
+| The environment server and playground | [FineEnvs/retroenv](https://huggingface.co/spaces/FineEnvs/retroenv) |
+
+To work from the release itself, or rebuild it:
+
+```bash
+uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL
+RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
+
+# Rebuild from PaRoutes v2 (346 MB download, about an hour on 32 cores)
 uv run python dataset/download_raw.py --source paroutes-v2-benchmark
 uv run python -m dataset.build_release                   # data/release/RetroEnv-RL (git-ignored)
 uv run python -m dataset.audit_release                   # leakage, solvability, reward probes
 uv run python -m dataset.publish_release --runs runs     # publish to LiteFold/RetroEnv
 
-RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
-uv run python explorer/server.py                         # http://127.0.0.1:8050
+# Then the serving copy: the index, final_eval, the bucket, and the pinned manifest
+uv run python -m dataset.build_final_eval                # data/eval-final_eval.json
+uv run python -m dataset.publish_bucket                  # FineEnvs/retroenv-bucket
+python envs/retro_route/openenv/deploy.py --repo FineEnvs/retroenv --public
 ```
 
 ## The release
@@ -42,6 +57,9 @@ reactions.
 | dev | 1,000 | 1,079 | 2–7, flattened | checkpoints, reward calibration |
 | test_id | 1,000 | 1,083 | 2–8, flattened | unseen targets, training distribution |
 | test_hard | 1,000 | 1,119 | 4–8 | novel (nearest other-patent Tanimoto < 0.6) and convergent, rare-template or complex-ring chemistry |
+| final_eval | 50 | 50 | 2–8 | 17 easy, 17 medium, 16 hard standard tasks from test_id and test_hard, for a quick board |
+
+`final_eval` is a subset, not a new split: [`data/eval-final_eval.json`](data/eval-final_eval.json) pins its task ids, and the server serves them as their own split, scored exactly as in test_id and test_hard.
 
 Held-out targets share no patent, route molecule, reaction, scaffold group or Tanimoto ≥
 0.90 near-duplicate with train or with each other, including the molecules of variant

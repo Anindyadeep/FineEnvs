@@ -1,16 +1,18 @@
 # Project manifest. `tools/build_index.py` renders the root README table from it.
 name: retroenv
 title: "RetroEnv"
-tagline: "Plan retrosyntheses back to purchasable molecules, scored against patent routes by a deterministic verifier."
+tagline: "Plan retrosyntheses back to purchasable molecules, scored step by step against a frozen reaction library."
 order: 9
 status: wip
 
 hub:
   org: FineEnvs
-  spaces: []
+  spaces:
+    - FineEnvs/retroenv              # OpenEnv server and playground, serving the bucket snapshot
   datasets:
-    - AdithyaSK/RetroEnv-RL    # v3 benchmark (RL tasks and answer key), v2 and its model board
-    - AdithyaSK/RetroEnv-SFT   # SFT trajectories for the v3 train split
+    - LiteFold/RetroEnv              # the release: tasks, known routes, stock, reaction library, eval runs
+  buckets:
+    - FineEnvs/retroenv-bucket       # serving copy: the pinned release, its index and final_eval
 
 envs:
   - name: retro_route

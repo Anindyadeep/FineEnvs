@@ -13,7 +13,7 @@ short_description: Plan retrosynthesis routes with verifier-backed rewards.
 
 # RetroEnv: OpenEnv server
 
-An agent gets a target molecule and works back to purchasable starting materials. It uses tools to inspect molecules, search a fixed stock and training precedents, and check disconnections. It ends the episode by submitting molecule/reaction trees with `emit_routes`, and the verifier scores them against hidden patent routes from PaRoutes.
+An agent gets a target molecule and works back to purchasable starting materials. It uses tools to inspect molecules, search a fixed stock and training precedents, and check disconnections. It ends the episode by submitting molecule/reaction trees with `emit_routes`, and the verifier judges every step against a frozen reaction library; matching the patent route only adds a bonus.
 
 The same server is used for training, evaluation and the browser playground at `/web`.
 
@@ -44,57 +44,81 @@ The same server is used for training, evaluation and the browser playground at `
 
 The Task API lists splits and public task rows without references: `GET /retro_route/splits`, and `POST /retro_route/task`, `/tasks`, `/task_range` and `/num_tasks`. The API docs are at `/docs`.
 
+## Data and splits
+
+The server serves a pinned snapshot of [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv)
+from the public bucket [FineEnvs/retroenv-bucket](https://huggingface.co/buckets/FineEnvs/retroenv-bucket).
+`corpus-manifest.json`, beside the server code, pins it: the release revision, the serving index and the
+SHA-256 of every file a server reads.
+
+| Split | Tasks | Use |
+|---|---:|---|
+| `train` | 75,224 | RL rollouts |
+| `dev` | 1,079 | checkpoint selection |
+| `test_id` | 1,083 | unseen targets, training distribution |
+| `test_hard` | 1,119 | longer, novel or rarer chemistry |
+| `final_eval` | 50 | 17 easy, 17 medium, 16 hard from the two test splits (`dataset/build_final_eval.py`) |
+
+`final_eval` names tasks of the test splits, so they score exactly as there.
+
 ## Run locally
 
 From the project folder (`09-retroenv`):
 
 ```bash
 uv sync --extra dev --extra eval
-RETROENV_TASKS_REPO=LiteFold/RetroEnv uv run bash envs/retro_route/openenv/start.sh
+uv run bash envs/retro_route/openenv/start.sh
 ```
 
-`start.sh` runs `prepare.py`, which downloads a released task dataset from the Hub
-(`RETROENV_TASKS_REPO`) and verifies its checksums, then starts the server on it. To serve a
-local release instead:
+`start.sh` runs `prepare.py`, which downloads the pinned snapshot from the bucket (about 230 MB,
+once), checks every file's SHA-256, and starts the server; a restart reuses the checked files.
+Startup then takes about 10 s. To serve a local release directory without an index instead:
 
 ```bash
 RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
 ```
 
-Open <http://localhost:8000/web/> for the playground. To run one model episode against the server:
+Open <http://localhost:8000/web/> for the playground. Its Plan tab works the way the task does: pick
+the molecule still to make, take a cut the rule library proposes (or type one), check it and its
+pieces with the real tools, and add it to a route drawn as it grows; "Fill from the plan" turns that
+route into the `emit_routes` submission. Each molecule is drawn in 2D and, from an RDKit conformer,
+in 3D (vendored [3Dmol.js](https://3dmol.csb.pitt.edu/), so it works offline). To run one model
+episode against the server:
 
 ```bash
 uv run python envs/retro_route/openenv/rollout.py --server http://127.0.0.1:8000 \
-  --split test_id --index 0 --provider anthropic --model claude-opus-5-5
+  --split final_eval --index 0 --provider anthropic --model claude-opus-5-5
 ```
-
-Releases are not in git. Download the published one with `uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL`, or build it with `uv run python -m dataset.build_release`. `tests/fixtures/mini-release` is a small committed release for tests.
 
 ## Docker and Spaces
 
-The image never contains the answer key. At startup `prepare.py` uses a mounted directory or downloads a task dataset; the image defaults to `RETROENV_TASKS_REPO=LiteFold/RetroEnv`.
+The image holds code and `corpus-manifest.json` only. On a Space the bucket is mounted read-only at
+`/data` and `prepare.py` copies the snapshot from there; with nothing mounted it downloads it.
 
 ```bash
 python deploy.py --stage-only --stage-dir /tmp/retroenv-space
 docker build -t retroenv /tmp/retroenv-space
-docker run --rm -p 8000:8000 retroenv                       # the release named by RETROENV_TASKS_REPO
-docker run --rm -p 8000:8000 -v "$PWD/data/release/RetroEnv-RL:/data:ro" \
-  -e RETROENV_BENCHMARK_DIR=/data retroenv                  # a local directory
+docker run --rm -p 8000:8000 retroenv                       # downloads the pinned snapshot
 ```
 
-To deploy a Space that serves the published benchmark:
+[FineEnvs/retroenv](https://huggingface.co/spaces/FineEnvs/retroenv) is deployed with:
 
 ```bash
-python deploy.py --repo YOUR_ORG/retroenv --tasks-repo LiteFold/RetroEnv
+python deploy.py --repo FineEnvs/retroenv --public
 ```
 
-A private task dataset also works; add `HF_TOKEN` as a Space secret so the Space can read it. The Space is private by default; `--public` makes it public.
+`deploy.py` refuses to deploy unless every file the manifest names is already in the bucket, mounts
+the bucket, and sets the variables below. A new snapshot comes from `dataset/publish_bucket.py`,
+which also rewrites `corpus-manifest.json`.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `RETROENV_BENCHMARK_DIR` | none | Local release directory with `tasks-private/`, `stocks/` and `library/` |
-| `RETROENV_TASKS_REPO` | `LiteFold/RetroEnv` in the image | Task dataset `org/name[@revision]`, used when no directory is set |
-| `RETROENV_TASKS_SUBDIR` | none | Folder inside that dataset |
+| `RETROENV_CORPUS_MANIFEST` | `corpus-manifest.json` here | The serving snapshot to fetch and check |
+| `RETROENV_BUCKET_ROOT` | `/data` in the image | A mounted copy of the bucket; files missing there are downloaded |
+| `RETROENV_BUCKET_ID` | the manifest's | The bucket to download from, if it was renamed |
+| `RETROENV_PREPARED_DIR` | `prepared` | Where the checked snapshot is kept between restarts |
+| `RETROENV_BENCHMARK_DIR` | none | A local release or prepared directory, used as is |
+| `RETROENV_TASKS_REPO` | none | A release dataset `org/name[@revision]`, served without an index |
 | `RETROENV_TOOLSET` | `full` | `unaided` removes `validate_disconnection` (an ablation) |
 | `RETROENV_MAX_TOOL_CALLS` | `32` | Tool budget per episode |
 | `RETROENV_DEFAULT_SPLIT` | `train` | Split used by a reset that names none |

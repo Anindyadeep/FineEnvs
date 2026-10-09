@@ -86,7 +86,7 @@ def main() -> int:
         "## Reading the table",
         "",
         "**No emit** is the share of episodes the model never closed with `emit_routes`; the harness "
-        "then submits an empty route set, which scores the 0.05 floor. **Refused** is the share the "
+        "then submits an empty route set, which scores 0. **Refused** is the share the "
         "provider declined on safety grounds, which counts as a failed episode and is never re-routed "
         "to another model. Where the two columns match, every unclosed episode was a refusal, and the "
         "model's reward is held down by requests it did not answer rather than by its chemistry.",
