@@ -61,7 +61,9 @@ def main():
         VLLM_USE_DEEP_GEMM="0",
         VLLM_DEEP_GEMM_WARMUP="skip",
         VLLM_USE_FLASHINFER_SAMPLER="0",
-        VLLM_API_KEY="EMPTY",  # read by the evaluator's OpenAI client; vLLM runs without a key
+        # The evaluator's OpenAI client needs a key; vLLM runs without one. Not VLLM_API_KEY,
+        # which `vllm serve` reads as the key every request must carry.
+        RETROENV_EVAL_KEY="EMPTY",
     )
     with ExitStack() as stack:
         sockets = [stack.enter_context(socket.socket()) for _ in range(2)]
@@ -175,7 +177,7 @@ def main():
                 "--concurrency", str(args.concurrency),
                 "--provider", "custom",
                 "--endpoint", engine_url + "/v1",
-                "--api-key-env", "VLLM_API_KEY",
+                "--api-key-env", "RETROENV_EVAL_KEY",
                 "--tool-choice", "auto",
                 "--label", label,
             ]  # fmt: skip
