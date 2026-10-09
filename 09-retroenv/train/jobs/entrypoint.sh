@@ -6,6 +6,8 @@ mkdir -p /workspace/retroenv
 cp -a /source/. /workspace/retroenv/
 cd /workspace/retroenv
 bash train/jobs/install.sh
+# vLLM's kernel builds call ninja and friends by name, as in 05-multi-harness-rl.
+export PATH="$PWD/.venv-train/bin:$PATH"
 
 # The serving snapshot comes from the RetroEnv bucket, mounted read-only at /data, and every
 # file is checked against the pinned manifest's SHA-256 (envs/retro_route/openenv/prepare.py).
