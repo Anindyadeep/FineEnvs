@@ -21,8 +21,9 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     template = output / "chat_template.jinja"
     template.write_text(tokenizer_for(args.model).chat_template)
+    # The vllm executable of this environment; the job never activates it, so it is not on PATH.
     command = [
-        "vllm", "serve", args.checkpoint or args.model,
+        str(Path(sys.executable).parent / "vllm"), "serve", args.checkpoint or args.model,
         "--host", "127.0.0.1",
         "--port", str(args.port),
         "--served-model-name", args.model,
