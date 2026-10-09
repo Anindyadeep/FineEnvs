@@ -15,7 +15,7 @@ evidence, not proof that a synthesis works in the lab.
 uv sync --extra dev --extra eval
 uv run pytest                                            # runs on tests/fixtures/mini-release
 
-# Serve the pinned snapshot from the FineEnvs bucket (230 MB once, then about 10 s per start)
+# Serve the pinned snapshot from the FineEnvs bucket (115 MB once, then about 10 s per start)
 uv run bash envs/retro_route/openenv/start.sh            # http://localhost:8000/web/
 uv run python explorer/server.py                         # http://127.0.0.1:8050
 ```

@@ -70,7 +70,7 @@ uv sync --extra dev --extra eval
 uv run bash envs/retro_route/openenv/start.sh
 ```
 
-`start.sh` runs `prepare.py`, which downloads the pinned snapshot from the bucket (about 230 MB,
+`start.sh` runs `prepare.py`, which downloads the pinned snapshot from the bucket (about 115 MB,
 once), checks every file's SHA-256, and starts the server; a restart reuses the checked files.
 Startup then takes about 10 s. To serve a local release directory without an index instead:
 

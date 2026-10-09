@@ -25,7 +25,7 @@ public copy a server reads, written by `dataset/publish_bucket.py`:
 | Bucket path | What it is |
 |---|---|
 | `manifest.json`, `checksums.json`, `library/`, `stocks/`, `tasks-*/` | The release at a pinned revision, copied server-side by Xet hash; `runs/` is left out |
-| `openenv/indexes/<snapshot_id>/serving.sqlite` | The serving index: task rows, stock and precedents, precomputed |
+| `openenv/indexes/<snapshot_id>/serving.sqlite.gz` | The serving index: task rows, stock and precedents, precomputed; gzipped (196 to 82 MB), and `prepare.py` checks it before and after unpacking |
 | `openenv/evalsets/final_eval.json` | The frozen 50-task `final_eval` subset (also [here](eval-final_eval.json)) |
 | `openenv/indexes/<snapshot_id>/manifest.json` | What a server fetches, with each file's size and SHA-256; published last |
 

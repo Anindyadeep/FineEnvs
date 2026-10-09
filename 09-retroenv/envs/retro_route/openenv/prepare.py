@@ -20,6 +20,7 @@ The last line printed is the directory to serve; ``start.sh`` passes it to the s
 
 from __future__ import annotations
 
+import gzip
 import hashlib
 import json
 import os
@@ -45,7 +46,7 @@ def verify(root: Path) -> None:
     pinned = root / "corpus-manifest.json"
     if pinned.exists():
         manifest = json.loads(pinned.read_text())
-        bad = [e["local"] for e in _entries(manifest) if not _matches(root / e["local"], e)]
+        bad = [e["local"] for e in _entries(manifest) if not _matches(root / e["local"], _unpacked(e))]
         if bad:
             raise SystemExit(f"prepare: {root} does not match its corpus manifest: {bad[:5]}")
         print(f"prepare: verified {len(_entries(manifest))} file(s) in {root}", file=sys.stderr)
@@ -73,8 +74,38 @@ def _entries(manifest: dict) -> list[dict]:
     return [*manifest["files"], *manifest.get("evalsets", {}).values()]
 
 
-def _matches(path: Path, entry: dict) -> bool:
-    return path.exists() and path.stat().st_size == entry["size"] and sha256_file(path) == entry["sha256"]
+def _unpacked(entry: dict) -> dict:
+    """What the prepared file must match: the entry itself, or what its gzip expands to."""
+    return entry.get("unpacked") or entry
+
+
+def _matches(path: Path, expected: dict) -> bool:
+    return path.exists() and path.stat().st_size == expected["size"] and sha256_file(path) == expected["sha256"]
+
+
+def _fetched(prepared: Path, entry: dict) -> Path:
+    """Where a file lands before it is checked: still gzipped if the bucket stores it packed."""
+    target = prepared / entry["local"]
+    return target.with_name(target.name + (".gz.partial" if entry.get("unpacked") else ".partial"))
+
+
+def _settle(prepared: Path, entry: dict) -> bool:
+    """Check a fetched file, unpack it if needed, and move it into place; False if it is bad."""
+    target, fetched = prepared / entry["local"], _fetched(prepared, entry)
+    if not _matches(fetched, entry):
+        fetched.unlink()
+        return False
+    if entry.get("unpacked"):
+        unpacked = target.with_name(target.name + ".partial")
+        with gzip.open(fetched, "rb") as source, unpacked.open("wb") as sink:
+            shutil.copyfileobj(source, sink, 1 << 20)
+        fetched.unlink()
+        if not _matches(unpacked, entry["unpacked"]):
+            unpacked.unlink()
+            return False
+        fetched = unpacked
+    fetched.replace(target)
+    return True
 
 
 def from_bucket(manifest_path: Path, prepared: Path) -> Path:
@@ -89,12 +120,12 @@ def from_bucket(manifest_path: Path, prepared: Path) -> Path:
     for entry in _entries(manifest):
         target = prepared / entry["local"]
         target.parent.mkdir(parents=True, exist_ok=True)
-        if _matches(target, entry):
+        if _matches(target, _unpacked(entry)):
             kept += 1
             continue
         mounted = mount / entry["path"] if mount else None
         if mounted is not None and mounted.exists() and mounted.stat().st_size == entry["size"]:
-            shutil.copyfile(mounted, target.with_name(target.name + ".partial"))
+            shutil.copyfile(mounted, _fetched(prepared, entry))
             copied += 1
         else:
             pending.append(entry)
@@ -103,21 +134,12 @@ def from_bucket(manifest_path: Path, prepared: Path) -> Path:
 
         HfApi().download_bucket_files(
             bucket,
-            [(e["path"], str((prepared / e["local"]).with_name(Path(e["local"]).name + ".partial"))) for e in pending],
+            [(e["path"], str(_fetched(prepared, e))) for e in pending],
             raise_on_missing_files=True,
             token=os.getenv("HF_TOKEN") or None,
         )
     # Settle every fetched file before failing: good ones are kept for the next attempt.
-    bad = []
-    for entry in _entries(manifest):
-        target = prepared / entry["local"]
-        partial = target.with_name(target.name + ".partial")
-        if partial.exists():
-            if _matches(partial, entry):
-                partial.replace(target)
-            else:
-                partial.unlink()
-                bad.append(entry["path"])
+    bad = [e["path"] for e in _entries(manifest) if _fetched(prepared, e).exists() and not _settle(prepared, e)]
     if bad:
         raise SystemExit(f"prepare: {bad} from {bucket} does not match its manifest digest")
     # An evaluation set from an earlier snapshot would otherwise still be served.

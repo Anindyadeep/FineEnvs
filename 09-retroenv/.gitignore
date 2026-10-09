@@ -19,5 +19,5 @@ __pycache__/
 # Model evaluation runs: transcripts include solved routes, so only summaries are committed.
 runs/
 
-# The serving snapshot prepare.py fetches for a local server (about 230 MB).
+# The serving snapshot prepare.py fetches for a local server (about 230 MB unpacked).
 envs/retro_route/openenv/prepared/

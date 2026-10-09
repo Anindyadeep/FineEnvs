@@ -8,7 +8,7 @@
 serve it, under these paths:
 
     <release paths>                               LiteFold/RetroEnv at a pinned revision; runs/ left out
-    openenv/indexes/<snapshot_id>/serving.sqlite  tasks, stock and precedents, precomputed
+    openenv/indexes/<snapshot_id>/serving.sqlite.gz  tasks, stock and precedents, precomputed
     openenv/evalsets/<name>.json                  frozen evaluation sets (final_eval)
     openenv/indexes/<snapshot_id>/manifest.json   what a server fetches and checks; published last
 
@@ -16,13 +16,22 @@ Release files are copied server-side by their Xet hash, so nothing large is re-u
 few small text files without one come from the local copy, which must match the pinned
 revision. The same manifest is written to ``envs/retro_route/openenv/corpus-manifest.json``:
 committing it pins what every server, local or on a Space, serves.
+
+The index is stored gzipped (196 MB becomes 82 MB); prepare.py unpacks it and checks both
+digests. A rerun skips whatever the bucket already holds at the right size, so an upload cut
+short resumes. On a slow or lossy uplink, fewer parallel connections and more retries help:
+
+    HF_XET_FIXED_UPLOAD_CONCURRENCY=4 HF_XET_CLIENT_RETRY_MAX_ATTEMPTS=20 \\
+        uv run python -m dataset.publish_bucket
 """
 
 from __future__ import annotations
 
 import argparse
+import gzip
 import hashlib
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -85,6 +94,24 @@ def entry(path: str, local: Path, destination: str) -> dict[str, Any]:
     return {"path": path, "local": destination, "size": local.stat().st_size, "sha256": sha256_file(local)}
 
 
+def pack(path: Path) -> Path:
+    """Gzip ``path`` reproducibly: no name or timestamp in the header, so the digest is stable."""
+    packed = path.with_name(path.name + ".gz")
+    with path.open("rb") as source, packed.open("wb") as raw:
+        with gzip.GzipFile(filename="", mode="wb", fileobj=raw, mtime=0, compresslevel=6) as sink:
+            shutil.copyfileobj(source, sink, 1 << 20)
+    return packed
+
+
+def upload_missing(api: Any, bucket: str, files: list[tuple[Path, str, int]]) -> None:
+    """Upload each (local, bucket path, size) unless the bucket already holds it at that size."""
+    present = {f.path: f.size for f in api.get_bucket_paths_info(bucket, [path for _, path, _ in files])}
+    todo = [(str(local), path) for local, path, size in files if present.get(path) != size]
+    if todo:
+        api.batch_bucket_files(bucket, add=todo)
+    print(f"snapshot files: {len(todo)} uploaded, {len(files) - len(todo)} already there")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--bucket", default=BUCKET_ID)
@@ -120,7 +147,13 @@ def main(argv: list[str] | None = None) -> int:
 
     served = [f for f in files if f.path.startswith(SERVED)]
     manifest_files = [entry(f.path, args.release / f.path, f.path) for f in served]
-    manifest_files.append(entry(f"{prefix}/{INDEX_FILE}", index_path, f"serving/{INDEX_FILE}"))
+    packed = pack(index_path)
+    manifest_files.append(
+        {
+            **entry(f"{prefix}/{INDEX_FILE}.gz", packed, f"serving/{INDEX_FILE}"),
+            "unpacked": {"size": index["size"], "sha256": index["sha256"]},
+        }
+    )
     evalsets = {}
     for path in evalset_paths:
         record = load_evalset(path)
@@ -151,9 +184,11 @@ def main(argv: list[str] | None = None) -> int:
 
     api.create_bucket(args.bucket, private=False, exist_ok=True)
     mirror(api, args.bucket, files, args.release)
-    adds = [(str(index_path), f"{prefix}/{INDEX_FILE}")]
-    adds += [(str(path), f"openenv/evalsets/{load_evalset(path)['name']}.json") for path in evalset_paths]
-    api.batch_bucket_files(args.bucket, add=adds)
+    uploads = [(packed, f"{prefix}/{INDEX_FILE}.gz", packed.stat().st_size)]
+    uploads += [
+        (path, f"openenv/evalsets/{load_evalset(path)['name']}.json", path.stat().st_size) for path in evalset_paths
+    ]
+    upload_missing(api, args.bucket, uploads)
     # Verify everything the manifest names before publishing it: a server trusts the manifest.
     expected = {f["path"]: f["size"] for f in manifest_files} | {e["path"]: e["size"] for e in evalsets.values()}
     found = {f.path: f.size for f in api.get_bucket_paths_info(args.bucket, list(expected))}

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import json
 import shutil
@@ -99,7 +100,13 @@ def _fake_bucket(root: Path) -> tuple[Path, dict]:
         for p in sorted(bucket.rglob("*"))
         if p.is_file() and not str(p.relative_to(bucket)).startswith("openenv")
     ]
-    files.append(entry(f"{prefix}/serving.sqlite", "serving/serving.sqlite"))
+    # The index is stored gzipped, as publish_bucket stores it; prepare unpacks and checks both.
+    index = bucket / prefix / "serving.sqlite"
+    with index.open("rb") as source, gzip.open(index.with_suffix(".sqlite.gz"), "wb") as sink:
+        shutil.copyfileobj(source, sink)
+    unpacked = {"size": index.stat().st_size, "sha256": prepare.sha256_file(index)}
+    index.unlink()
+    files.append({**entry(f"{prefix}/serving.sqlite.gz", "serving/serving.sqlite"), "unpacked": unpacked})
     manifest = {
         "status": "ready",
         "storage": "bucket-sqlite",
@@ -175,6 +182,19 @@ def test_a_corrupted_bucket_file_stops_the_server(tmp_path, monkeypatch):
     with pytest.raises(SystemExit, match="does not match its manifest digest"):
         prepare.main()
     assert not list(prepared.rglob("*.partial"))
+
+
+def test_a_packed_file_that_unpacks_wrong_stops_the_server(tmp_path, monkeypatch):
+    manifest, data = _fake_bucket(tmp_path)
+    packed = next(e for e in data["files"] if e.get("unpacked"))
+    packed["unpacked"]["sha256"] = "0" * 64  # the gzip is intact but expands to something else
+    manifest.write_text(json.dumps(data))
+    prepared = tmp_path / "prepared"
+    _bucket_env(monkeypatch, manifest, prepared, mount=tmp_path / "bucket")
+    _fake_bucket_http(monkeypatch, tmp_path / "bucket")
+    with pytest.raises(SystemExit, match="serving.sqlite.gz"):
+        prepare.main()
+    assert not list(prepared.rglob("*.partial")) and not (prepared / "serving/serving.sqlite").exists()
 
 
 def test_an_evalset_dropped_from_the_snapshot_is_no_longer_served(tmp_path, monkeypatch):
