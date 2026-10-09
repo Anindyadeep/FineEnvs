@@ -114,7 +114,10 @@ def main():
             if worker.returncode:
                 raise RuntimeError(f"{name} exited {worker.returncode}; inspect {output / (name + '.log')}")
         finally:
-            children.append(worker)
+            # Only a step that is still running needs the teardown below; a finished one would
+            # read as a crashed service to the next health check.
+            if worker.poll() is None:
+                children.append(worker)
 
     def stop(signum, frame):
         raise KeyboardInterrupt
