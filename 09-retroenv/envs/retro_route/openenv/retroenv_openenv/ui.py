@@ -181,7 +181,11 @@ class PlaygroundSession:
 
 
 def build_ui(*_: Any, **__: Any) -> gr.Blocks:
-    store = shared_resources().store
+    resources = shared_resources()
+    store = resources.store
+    snapshot_path = resources.benchmark.root / "corpus-manifest.json"
+    snapshot = json.loads(snapshot_path.read_text()) if snapshot_path.exists() else None
+    credits = render.credits_panel(resources.benchmark.manifest.get("source"), snapshot)
     splits = store.splits()
     default_split = "test_id" if "test_id" in splits else splits[0]
 
@@ -241,6 +245,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                 "<h2 style='margin:0'>RetroEnv</h2><p class='muted' style='margin:2px 0 0'>Plan routes back to "
                 "purchasable molecules. These are the tools and the verifier that agents use. "
                 "API: <a href='/docs'>/docs</a> · tasks: <a href='/retro_route/splits'>/retro_route/splits</a></p>"
+                f"<p class='muted' style='margin:2px 0 0'>{render.credit_line()}</p>"
             ),
             apply_default_css=False,
         )
@@ -288,6 +293,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
                     routes = gr.HTML(render.routes_panel(None), apply_default_css=False)
                 with gr.Tab("History"):
                     history = gr.HTML(render.history_panel([]), apply_default_css=False)
+        gr.HTML(credits, apply_default_css=False)
 
         def on_split(name: str):
             return gr.update(choices=task_choices(name), value=0)

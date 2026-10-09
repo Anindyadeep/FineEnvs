@@ -35,6 +35,8 @@ footer { display: none !important; }
 .gradio-container .tab-nav button { font-weight: 500; }
 .gradio-container .retro { font-size: 13px; line-height: 1.5; color: var(--body-text-color); }
 .gradio-container .retro .muted { color: var(--body-text-color-subdued); }
+.gradio-container .retro a { color: inherit; text-decoration: underline; text-underline-offset: 2px;
+  text-decoration-color: var(--body-text-color-subdued); }
 .gradio-container .retro .mono { font-family: var(--font-mono); font-size: 12px; overflow-wrap: anywhere; }
 .gradio-container .retro .mol { border: 1px solid var(--border-color-primary); border-radius: 6px;
   display: inline-block; line-height: 0; padding: 2px; color: var(--body-text-color); }
@@ -270,6 +272,64 @@ def score_panel(score: dict[str, Any] | None) -> str:
         + f"<table><thead><tr><th>Component</th><th class='num'>Score</th></tr></thead><tbody>{rows}</tbody></table>"
         + (f"<p class='muted'>Why it failed</p><ul>{failures}</ul>" if failures else "")
     )
+
+
+DATASET = "LiteFold/RetroEnv"
+DATASET_URL = "https://huggingface.co/datasets/LiteFold/RetroEnv"
+
+
+def _link(url: str, text: str) -> str:
+    return f'<a href="{html.escape(url)}" target="_blank" rel="noopener">{html.escape(text)}</a>'
+
+
+def credit_line() -> str:
+    """The one-line credit under the title: whose dataset this environment serves."""
+    return (
+        f"Tasks and known routes from {_link(DATASET_URL, DATASET)}, the dataset built and released by "
+        f"{_link('https://huggingface.co/LiteFold', 'LiteFold')} from PaRoutes v2 (CC BY 4.0). Credits at the "
+        "bottom of the page."
+    )
+
+
+def credits_panel(source: dict[str, Any] | None, snapshot: dict[str, Any] | None) -> str:
+    """Where the data comes from, for the playground's footer; values come from the served manifests."""
+    source, snapshot = source or {}, snapshot or {}
+    revision = (snapshot.get("source") or {}).get("revision")
+    dataset = _link(DATASET_URL, DATASET) + (
+        f" at revision <span class='mono'>{revision[:12]}</span>" if revision else ""
+    )
+    rows = [
+        (
+            "Dataset",
+            f"{dataset}, built and released by {_link('https://huggingface.co/LiteFold', 'LiteFold')}: every "
+            "task, known route and difficulty label, the stock and the reaction library served here",
+        ),
+        (
+            "Routes",
+            f"{html.escape(source.get('name', 'PaRoutes v2'))}: S. Genheden and E. Bjerrum, PaRoutes: towards a "
+            "framework for benchmarking retrosynthesis route predictions, <i>Digital Discovery</i> 2022 "
+            f"({_link('https://doi.org/10.1039/D2DD00015F', 'doi:10.1039/D2DD00015F')}); data "
+            f"{_link(source.get('url', 'https://zenodo.org/records/7341155'), 'Zenodo 7341155')}, "
+            f"{html.escape(source.get('license', 'CC-BY-4.0'))}",
+        ),
+        (
+            "Reactions",
+            "D. Lowe, Chemical reactions from US patents (1976 to Sep 2016), "
+            f"{_link('https://doi.org/10.6084/m9.figshare.5104873.v1', 'figshare')}, CC0",
+        ),
+        ("Software", "RDKit, rdchiral, 3Dmol.js and OpenEnv"),
+    ]
+    if snapshot.get("bucket_id"):
+        bucket = snapshot["bucket_id"]
+        rows.insert(
+            3,
+            (
+                "Served from",
+                f"{_link(f'https://huggingface.co/buckets/{bucket}', bucket)}, snapshot "
+                f"<span class='mono'>{html.escape(snapshot.get('snapshot_id', '')[:12])}</span>",
+            ),
+        )
+    return wrap("<h4 style='margin:0 0 6px'>Data and credits</h4>" + key_values(rows))
 
 
 def history_panel(history: list[dict[str, Any]]) -> str:

@@ -44,6 +44,20 @@ The same server is used for training, evaluation and the browser playground at `
 
 The Task API lists splits and public task rows without references: `GET /retro_route/splits`, and `POST /retro_route/task`, `/tasks`, `/task_range` and `/num_tasks`. The API docs are at `/docs`.
 
+## Data and credits
+
+The tasks, known routes, difficulty labels, stock and reaction library are
+[LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv), the dataset built and
+released by [LiteFold](https://huggingface.co/LiteFold). This server serves it unchanged.
+
+It derives from PaRoutes v2: S. Genheden and E. Bjerrum, *PaRoutes: towards a framework for
+benchmarking retrosynthesis route predictions*, Digital Discovery 2022
+([doi:10.1039/D2DD00015F](https://doi.org/10.1039/D2DD00015F)); data on
+[Zenodo 7341155](https://zenodo.org/records/7341155), CC BY 4.0. PaRoutes takes its reactions from
+D. Lowe, *Chemical reactions from US patents (1976 to Sep 2016)*
+([figshare](https://doi.org/10.6084/m9.figshare.5104873.v1)), CC0. Software: RDKit, rdchiral,
+3Dmol.js and OpenEnv.
+
 ## Data and splits
 
 The server serves a pinned snapshot of [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv)
