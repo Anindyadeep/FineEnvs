@@ -26,6 +26,8 @@ from train.sync_grpo import MODEL_REVISIONS, arguments, environment_factory, lor
 # importance-sampling correction.
 def main():
     args = arguments(__doc__, output="runs/rl/async_grpo")
+    if not args.smoke and args.steps % args.save_steps:
+        raise SystemExit(f"--steps {args.steps} must be a multiple of --save-steps {args.save_steps}")
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     os.environ["TRACKIO_DIR"] = str(output.resolve() / "trackio")
@@ -83,11 +85,13 @@ def main():
         peft_config=lora_config(),
     )
 
-    # %% 7. Train, then save the adapter and tokenizer for evaluation.
+    # %% 7. Train. The last checkpoint is the final adapter.
+    #
+    # max_steps is a multiple of save_steps, so checkpoint-<max_steps> is written inside the
+    # loop. A save_model() after train() is a collective under FSDP2, and in the h200x4 smoke
+    # rank 0 waited in it for half an hour with rank 1 already gone.
     (output / "training_config.json").write_text(json.dumps(config.to_dict(), indent=2, default=str))
     trainer.train()
-    trainer.save_model(str(output / "final"))
-    tokenizer.save_pretrained(output / "final")
     trainer.save_state()
 
 
