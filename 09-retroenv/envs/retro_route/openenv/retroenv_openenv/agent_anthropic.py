@@ -28,7 +28,8 @@ PRICES = {
     "claude-opus-5-5": (4.00, 20.00, 0.20),
     "claude-opus-5": (5.00, 25.00, 0.50),
     "claude-opus-4-8": (5.00, 25.00, 0.50),
-    "claude-sonnet-5-5": (2.00, 10.00, 0.20),
+    "claude-sonnet-5-5": (2.00, 10.00, 0.10),
+    "claude-haiku-5-5": (0.10, 0.50, 0.01),  # prompts up to 100k tokens; longer ones cost 5x
     "claude-sonnet-5": (2.00, 10.00, 0.20),
     "claude-sonnet-4-6": (3.00, 15.00, 0.30),
     "claude-haiku-4-5": (1.00, 5.00, 0.10),
@@ -44,8 +45,25 @@ class ClaudeConfig:
     max_tokens: int = 16000
     # None keeps the model default (medium on Claude Opus 5.5, high on Sonnet 5.5).
     effort: str | None = None
+    # The request's thinking setting; None keeps the model default (see thinking_off).
+    thinking: dict[str, Any] | None = None
     max_empty_turns: int = 2
     parallel_tool_calls: bool = False
+    repair: bool = True  # repair a submission sent as broken JSON (see normalize_arguments)
+
+
+# How each model turns thinking off, probed 2026-10-09. Sonnet 5.5 rejects "disabled" and
+# names "between_tools" instead: no thinking before replying, short notes between tool calls.
+# Opus 5.5 and Fable 5.1 cannot turn thinking off; low effort is the least they will do.
+_THINKING_OFF = {"claude-sonnet-5-5": {"type": "between_tools"}}
+_LOWEST_EFFORT_ONLY = ("claude-opus-5-5", "claude-fable-5-1")
+
+
+def thinking_off(model: str) -> tuple[dict[str, Any] | None, str | None, bool]:
+    """(thinking, effort, fully off) for a non-thinking run of ``model``."""
+    if model.startswith(_LOWEST_EFFORT_ONLY):
+        return None, "low", False
+    return _THINKING_OFF.get(model, {"type": "disabled"}), None, True
 
 
 def _cost(model: str, usage: dict[str, int]) -> float | None:
@@ -111,6 +129,8 @@ def run_episode(
         }
         if config.effort:
             request["output_config"] = {"effort": config.effort}
+        if config.thinking:
+            request["thinking"] = config.thinking
         try:
             response = llm.messages.create(**request)
         except anthropic.APIStatusError as exc:
@@ -149,7 +169,9 @@ def run_episode(
 
         results = []
         for call in calls:
-            arguments, was_coerced = normalize_arguments(call.name, call.input if isinstance(call.input, dict) else {})
+            arguments, was_coerced = normalize_arguments(
+                call.name, call.input if isinstance(call.input, dict) else {}, config.repair
+            )
             coerced = coerced or was_coerced
             if call.name not in allowed:
                 content: Any = {"error": f"unknown tool {call.name!r}"}

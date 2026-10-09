@@ -36,17 +36,18 @@ FINAL_TURN = (
 )
 
 
-def normalize_arguments(name: str, arguments: dict[str, Any]) -> tuple[dict[str, Any], bool]:
+def normalize_arguments(name: str, arguments: dict[str, Any], repair: bool = True) -> tuple[dict[str, Any], bool]:
     """Undo one provider-side encoding slip: a route submission sent as a JSON string.
 
     Some models serialize a deeply nested argument into a string and then break
     its escaping or brackets. The harness repairs that string before the call
     (and flags it) so the score measures the routes, not the transport. Anything
     that does not repair into a route-set object is passed through for the
-    verifier to judge.
+    verifier to judge. With ``repair=False`` nothing is touched: the server still
+    parses a well-formed JSON string, but a broken one fails, as it would in training.
     """
     value = arguments.get("submission")
-    if name != "emit_routes" or not isinstance(value, str):
+    if not repair or name != "emit_routes" or not isinstance(value, str):
         return arguments, False
     decoded = json_repair.loads(value)
     if not isinstance(decoded, dict) or "routes" not in decoded:
@@ -68,6 +69,7 @@ class AgentConfig:
     parallel_tool_calls: bool | None = False
     reasoning_effort: str | None = None
     extra_body: dict[str, Any] = field(default_factory=dict)
+    repair: bool = True  # repair a submission sent as broken JSON (see normalize_arguments)
 
 
 RETRY_DELAYS = (5, 15, 30, 60, 90, 120)
@@ -231,7 +233,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
                 result: Any = {"error": f"invalid tool arguments: {exc}"}
                 errors.append(result["error"])
             else:
-                arguments, was_coerced = normalize_arguments(name, arguments)
+                arguments, was_coerced = normalize_arguments(name, arguments, config.repair)
                 coerced = coerced or was_coerced
                 if name not in allowed:
                     result = {"error": f"unknown tool {name!r}"}

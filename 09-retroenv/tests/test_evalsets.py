@@ -80,3 +80,11 @@ def test_the_committed_final_eval_is_intact():
     tiers = [t["tier"] for t in record["tasks"]]
     assert (tiers.count("easy"), tiers.count("medium"), tiers.count("hard")) == (17, 17, 16)
     assert {t["source_split"] for t in record["tasks"]} == {"test_id", "test_hard"}
+
+
+def test_the_committed_core30_is_intact_and_nested_in_final_eval():
+    core = load_evalset(ROOT / "data" / "eval-core30.json")
+    final = {t["task_id"] for t in load_evalset(ROOT / "data" / "eval-final_eval.json")["tasks"]}
+    tiers = [t["tier"] for t in core["tasks"]]
+    assert core["size"] == 30 and (tiers.count("easy"), tiers.count("medium"), tiers.count("hard")) == (10, 10, 10)
+    assert {t["task_id"] for t in core["tasks"]} <= final

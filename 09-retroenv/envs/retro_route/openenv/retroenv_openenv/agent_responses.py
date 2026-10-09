@@ -24,6 +24,7 @@ class ResponsesConfig:
     max_output_tokens: int = 16000
     reasoning_effort: str | None = None  # None keeps the model default
     max_empty_turns: int = 2
+    repair: bool = True  # repair a submission sent as broken JSON (see normalize_arguments)
 
 
 def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: ResponsesConfig) -> dict[str, Any]:
@@ -116,7 +117,7 @@ def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: 
                 result: Any = {"error": f"invalid tool arguments: {exc}"}
                 errors.append(result["error"])
             else:
-                arguments, was_coerced = normalize_arguments(call.name, arguments)
+                arguments, was_coerced = normalize_arguments(call.name, arguments, config.repair)
                 coerced = coerced or was_coerced
                 if call.name not in allowed:
                     result = {"error": f"unknown tool {call.name!r}"}

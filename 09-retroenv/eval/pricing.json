@@ -1,5 +1,5 @@
 {
-  "_comment": "USD per million tokens, used when the provider does not report cost. Claude prices live in retroenv_openenv/agent_anthropic.py. HF router prices are the pinned provider's listing on 2026-10-02 (router.huggingface.co/v1/models); OpenAI prices match the v1 board snapshot.",
+  "_comment": "USD per million tokens, used when the provider does not report cost; cached_input applies to cached prompt tokens where the provider reports them. Claude prices live in retroenv_openenv/agent_anthropic.py. HF router prices are the pinned provider's listing (router.huggingface.co/v1/models); OpenAI prices are the standard tier, short context, checked 2026-10-09.",
   "gpt-5.6-sol": {
     "input": 2.0,
     "output": 10.0
@@ -27,5 +27,53 @@
   "Qwen/Qwen3.8-27B:cerebras": {
     "input": 0.99,
     "output": 1.49
+  },
+  "gpt-6.1-sol": {
+    "input": 2.0,
+    "cached_input": 0.1,
+    "output": 10.0
+  },
+  "gpt-6-astra": {
+    "input": 10.0,
+    "cached_input": 1.0,
+    "output": 50.0
+  },
+  "gpt-6-sol": {
+    "input": 2.0,
+    "cached_input": 0.2,
+    "output": 10.0
+  },
+  "gpt-6-luna": {
+    "input": 0.1,
+    "cached_input": 0.01,
+    "output": 0.5
+  },
+  "Qwen/Qwen3.6-35B-A3B:deepinfra": {
+    "input": 0.1,
+    "output": 0.95
+  },
+  "Qwen/Qwen3.8-2.4T-A95B:together": {
+    "input": 2.0,
+    "output": 6.0
+  },
+  "zai-org/GLM-5.3:novita": {
+    "input": 1.4,
+    "output": 4.4
+  },
+  "deepseek-ai/DeepSeek-V4-Pro-0813:together": {
+    "input": 1.32,
+    "output": 3.96
+  },
+  "moonshotai/Kimi-K2.6:novita": {
+    "input": 0.8,
+    "output": 3.4
+  },
+  "moonshotai/Kimi-K2.6:deepinfra": {
+    "input": 0.75,
+    "output": 3.5
+  },
+  "google/gemma-4-31B-it:novita": {
+    "input": 0.14,
+    "output": 0.4
   }
 }

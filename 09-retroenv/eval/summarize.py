@@ -36,7 +36,7 @@ def main() -> int:
     summaries.sort(key=lambda s: (-(s["pass_at_1"] or 0), -(s["mean_reward"] or 0)))
 
     header = (
-        "| Model | Tasks | Pass@1 (95% CI) | Exact route | Reward | Steps | Stock | Graph | "
+        "| Model | Tasks | Pass@1 (95% CI) | Exact route | Reward | Steps | Stock | Structure | "
         "Tool calls | No emit | Refused | Cost |"
     )
     lines = [header, "|" + "---|" * 12]
@@ -44,11 +44,12 @@ def main() -> int:
         c = s["components"]
         ci = s["pass_at_1_ci95"]
         cost = "—" if s["cost_usd"] is None else f"${s['cost_usd']:.2f}"
+        calls = "—" if s["mean_tool_calls"] is None else f"{s['mean_tool_calls']:.1f}"
         lines.append(
             f"| {s['label']} | {s['tasks']}/{s['episodes_expected']} | {pct(s['pass_at_1'])} "
             f"[{ci[0]:.2f}, {ci[1]:.2f}] | {pct(s['exact_route_rate'])} | {pct(s['mean_reward'])} | "
-            f"{pct(c.get('step_correctness'))} | {pct(c.get('stock_correctness'))} | {pct(c.get('graph_validity'))} | "
-            f"{s['mean_tool_calls']:.1f} | {pct(s['no_emit_rate'])} | {pct(s.get('refusal_rate'))} | {cost} |"
+            f"{pct(c.get('steps'))} | {pct(c.get('stock'))} | {pct(c.get('structure'))} | "
+            f"{calls} | {pct(s['no_emit_rate'])} | {pct(s.get('refusal_rate'))} | {cost} |"
         )
 
     def section(title: str, key: str) -> list[str]:
@@ -91,10 +92,10 @@ def main() -> int:
         "to another model. Where the two columns match, every unclosed episode was a refusal, and the "
         "model's reward is held down by requests it did not answer rather than by its chemistry.",
         "",
-        "**Steps**, **Stock** and **Graph** are the step-correctness, stock-correctness and "
-        "graph-validity reward components. A model can score well on stock and graph while failing the "
-        "task: those measure that the submitted tree is well formed and its leaf claims are truthful, "
-        "not that the route matches the patent.",
+        "**Steps**, **Stock** and **Structure** are the mean `steps`, `stock` and `structure` reward "
+        "components: steps the reaction library supports, leaves truthfully claimed as purchasable, and "
+        "a well-formed tree. A model can score well on all three while failing the task: they do not "
+        "measure whether the route matches the patent.",
         "",
     ]
     args.output.mkdir(parents=True, exist_ok=True)

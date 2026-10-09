@@ -261,6 +261,18 @@ def main() -> int:
     parser.add_argument("--temperature", type=float, help="override the provider default")
     parser.add_argument("--effort", help="Claude output_config.effort (default: the model's own default)")
     parser.add_argument("--reasoning-effort", help="OpenAI-compatible reasoning_effort")
+    parser.add_argument(
+        "--thinking",
+        choices=("default", "off"),
+        default="default",
+        help="off: Claude without thinking (lowest effort where it cannot be disabled), OpenAI reasoning "
+        "effort none unless --reasoning-effort says otherwise, open models with enable_thinking=false",
+    )
+    parser.add_argument(
+        "--no-repair",
+        action="store_true",
+        help="pass a malformed emit_routes submission through instead of repairing it, as training does",
+    )
     parser.add_argument("--tool-choice", default="required", help="OpenAI-compatible tool_choice")
     parser.add_argument("--max-cost", type=float, help="stop scheduling episodes once this many USD are spent")
     parser.add_argument("--output", type=Path, required=True)
@@ -295,14 +307,26 @@ def main() -> int:
         import anthropic
 
         llm: Any = anthropic.Anthropic(api_key=os.environ[key_env], max_retries=4, timeout=600)
+        thinking, effort, fully_off = None, args.effort, None
+        if args.thinking == "off":
+            thinking, lowest, fully_off = agent_anthropic.thinking_off(args.model)
+            effort = args.effort or lowest
         config: Any = agent_anthropic.ClaudeConfig(
             model=args.model,
             max_turns=args.max_turns,
             max_tokens=args.max_tokens or 16000,
-            effort=args.effort,
+            effort=effort,
+            thinking=thinking,
+            repair=not args.no_repair,
         )
         backend = agent_anthropic.run_episode
-        sampling = {"max_tokens": config.max_tokens, "effort": config.effort, "tool_choice": "auto"}
+        sampling = {
+            "max_tokens": config.max_tokens,
+            "effort": config.effort,
+            "thinking": thinking or args.thinking,
+            "thinking_fully_off": fully_off,
+            "tool_choice": "auto",
+        }
     elif preset["backend"] == "reference":
         llm = agent_reference.ReferenceTasks(args.benchmark_dir)
         config = agent.AgentConfig(model=args.model, max_turns=args.max_turns, temperature=None)
@@ -312,16 +336,19 @@ def main() -> int:
         from openai import OpenAI
 
         llm = OpenAI(base_url=endpoint, api_key=os.environ[key_env], timeout=600, max_retries=4)
+        effort = args.reasoning_effort or ("none" if args.thinking == "off" else None)
         config = agent_responses.ResponsesConfig(
             model=args.model,
             max_turns=args.max_turns,
             max_output_tokens=args.max_tokens or 16000,
-            reasoning_effort=args.reasoning_effort,
+            reasoning_effort=effort,
+            repair=not args.no_repair,
         )
         backend = agent_responses.run_episode
         sampling = {
             "max_output_tokens": config.max_output_tokens,
-            "reasoning_effort": args.reasoning_effort,
+            "reasoning_effort": effort,
+            "thinking": args.thinking,
             "tool_choice": "required",
         }
     else:
@@ -338,21 +365,27 @@ def main() -> int:
             token_param=preset.get("token_param", "max_tokens"),
             reasoning_effort=args.reasoning_effort,
             extra_body=dict(preset.get("extra_body") or {}),
+            repair=not args.no_repair,
         )
+        if args.thinking == "off":
+            # The chat-template switch Qwen, GLM, DeepSeek, Kimi and Gemma honour on the HF router.
+            config.extra_body["chat_template_kwargs"] = {"enable_thinking": False}
         backend = agent.run_episode
         sampling = {
             "max_tokens": config.max_tokens,
             "temperature": temperature,
             "tool_choice": args.tool_choice,
             "reasoning_effort": args.reasoning_effort,
+            "thinking": args.thinking,
         }
 
     private = args.benchmark_dir / "tasks-private" / f"{args.split}.jsonl"
     if not args.server and not private.exists():
         parser.error(f"{private} is missing; download the release from LiteFold/RetroEnv (see eval/README.md)")
     tiers = {}
-    if private.exists():
-        tiers = {row["task_id"]: row.get("difficulty", {}).get("tier") for row in map(json.loads, private.open())}
+    # An evaluation set (final_eval) has no task file of its own; its tasks live in their source splits.
+    for path in [private] if private.exists() else sorted((args.benchmark_dir / "tasks-private").glob("*.jsonl")):
+        tiers.update({row["task_id"]: row.get("difficulty", {}).get("tier") for row in map(json.loads, path.open())})
 
     output: Path = args.output
     with (
@@ -392,6 +425,7 @@ def main() -> int:
             "attempts": args.attempts,
             "max_turns": args.max_turns,
             "sampling": sampling,
+            "repair": not args.no_repair,
             "toolset": opening.get("toolset"),
             "max_tool_calls": opening.get("max_tool_calls"),
             "server": "local" if not args.server else args.server,
@@ -443,7 +477,12 @@ def main() -> int:
             usage = result["usage"]
             cost = usage.get("reported_cost_usd") or None
             if cost is None and price:
-                cost = (usage["prompt_tokens"] * price["input"] + usage["completion_tokens"] * price["output"]) / 1e6
+                cached = min(usage.get("cached_tokens", 0), usage["prompt_tokens"]) if "cached_input" in price else 0
+                cost = (
+                    (usage["prompt_tokens"] - cached) * price["input"]
+                    + cached * price.get("cached_input", 0.0)
+                    + usage["completion_tokens"] * price["output"]
+                ) / 1e6
             usage["cost_usd"] = round(cost, 6) if cost is not None else None
             infra = [e for e in result["errors"] if e.startswith("API")]
             row = {
