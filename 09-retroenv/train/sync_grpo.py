@@ -14,6 +14,7 @@ async_grpo.py is the same experiment with AsyncGRPO, which keeps generating whil
 # %% 1. Choose the model and run settings.
 import argparse
 import json
+import math
 import os
 import socket
 from functools import partial
@@ -39,6 +40,12 @@ def arguments(description=__doc__, output="runs/rl/sync_grpo"):
     parser.add_argument("--steps", type=int, default=100)
     parser.add_argument("--save-steps", type=int, default=50)
     parser.add_argument("--max-depth", type=int, default=4, help="Train on tasks with at most this depth budget")
+    parser.add_argument(
+        "--partial-credit",
+        type=float,
+        default=0.5,
+        help="Scale on a failed submission's grade; 1.0 trains on the grade",
+    )
     parser.add_argument("--space-id", help="Optional Trackio Space; local logs are always kept")
     return parser.parse_args()
 
@@ -76,15 +83,42 @@ def task_dataset(server, max_depth, seed=0):
 # %% 4. Give TRL the environment. Its public methods become the model's tools.
 #
 # RemoteRetroRouteEnv holds one WebSocket session per rollout. Each method calls the tool of
-# the same name on the server; `emit_routes` ends the episode and the server's grade becomes
-# `get_reward()`. An episode that never submits scores 0, as it does in evaluation. Every tool
-# result reports the calls left in the server's budget and, near the end, reminds the model to
-# submit: evaluation tells the model its turns left too, and without it most rollouts researched
-# until the loop ended, so whole groups tied at 0 and gave no gradient.
-def environment_factory(server):
-    from retroenv_openenv.client import RemoteRetroRouteEnv
+# the same name on the server; `emit_routes` ends the episode and the server grades it. An
+# episode that never submits scores 0, as it does in evaluation. Every tool result reports the
+# calls left in the server's budget and, near the end, reminds the model to submit: evaluation
+# tells the model its turns left too, and without it most rollouts researched until the loop
+# ended, so whole groups tied at 0 and gave no gradient.
+from retroenv_openenv.client import RemoteRetroRouteEnv  # noqa: E402  (imported in its section, as in 05)
 
-    return partial(RemoteRetroRouteEnv, server)
+
+# %% 5. Reward: the server's grade, with less for a submission that fails.
+#
+# The grade gives partial credit to a failed submission: one cut the reaction library accepts,
+# with no leaf in stock, earns about 0.55 against about 0.88 for a solved task, and a policy can
+# reach that floor by checking one cut and stopping. Training scales a failed submission's grade
+# by `partial_credit`, so solving pays clearly more than stopping early while a better failed tree
+# still beats a worse one. A solved task keeps its grade; episodes.jsonl keeps the pure grade.
+class TrainingEnv(RemoteRetroRouteEnv):
+    def __init__(self, server, partial_credit=0.5):
+        super().__init__(server)
+        self._partial_credit = partial_credit
+
+    def get_reward(self):
+        grade = super().get_reward()  # NaN when the session broke: no grade, not a wrong answer
+        return grade if math.isnan(grade) or self.passed else self._partial_credit * grade
+
+
+def environment_factory(server, partial_credit=0.5):
+    return partial(TrainingEnv, server, partial_credit=partial_credit)  # picklable, for AsyncGRPO
+
+
+# Logged beside the reward with weight 0: the share of episodes that solved the task, and that submitted.
+def solved(environments, **_):
+    return [None if env.failed else float(env.passed) for env in environments]
+
+
+def submitted(environments, **_):
+    return [None if env.failed else float(env.submitted) for env in environments]
 
 
 # LoRA on the language model only: attention, the linear-attention projections and the MLP
@@ -105,7 +139,7 @@ def lora_config():
     )
 
 
-# %% 5. Configure GRPO. These are the experiment's hyperparameters.
+# %% 6. Configure GRPO. These are the experiment's hyperparameters.
 def main():
     args = arguments()
     output = Path(args.output)
@@ -137,6 +171,15 @@ def main():
         top_k=0,
         beta=0.0,
         loss_type="dapo",
+        epsilon_high=0.28,  # DAPO's clip-higher: room for unlikely good tokens, against entropy collapse
+        mask_truncated_completions=True,  # an episode cut off by the length limit is not a verdict
+        # vLLM and the trainer disagree slightly on each token's log-probability. TRL's default
+        # corrects with one ratio per sequence, the product over every model token, and over a
+        # 16-turn episode that product drifts far from 1 and masks or zeroes whole episodes (the
+        # first smoke logged ratios of 0 and 1.07). Truncated per-token ratios (TIS) do not.
+        vllm_importance_sampling_mode="token_truncate",
+        vllm_importance_sampling_clip_max=2.0,
+        reward_weights=[0.0, 0.0],  # solved and submitted are logged only; TrainingEnv adds the reward
         chat_template_kwargs={"enable_thinking": False, "preserve_thinking": True},
         generation_kwargs={"max_tokens": 4096},  # per model turn
         optim="paged_adamw_8bit",
@@ -165,15 +208,15 @@ def main():
         processing_class=tokenizer,
         args=config,
         train_dataset=dataset,
-        reward_funcs=[],  # the environment owns the reward
-        environment_factory=environment_factory(args.server),
+        reward_funcs=[solved, submitted],
+        environment_factory=environment_factory(args.server, args.partial_credit),
         peft_config=lora_config(),
     )
     # TRL's text-only tool loop reads the context limit from the outer (multimodal) config.
     text_config = trainer.model.config.get_text_config()
     trainer.model.config.max_position_embeddings = text_config.max_position_embeddings
 
-    # %% 6. Train, then save the adapter and tokenizer for evaluation.
+    # %% 7. Train, then save the adapter and tokenizer for evaluation.
     (output / "training_config.json").write_text(json.dumps(config.to_dict(), indent=2, default=str))
     try:
         trainer.train()

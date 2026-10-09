@@ -66,6 +66,23 @@ calls left in the server's 32-call budget and, with four left, a reminder to sub
 keeps the board's 16 turns and training allows 20, so an overrun can still submit. Each graded
 episode is appended to `episodes.jsonl` in the run directory (task, reward, submitted, tool calls).
 
+### What makes the gradient
+
+| Choice | Why |
+|---|---|
+| Tool results carry the budget left; 20 turns against the prompt's 16 | Without them most rollouts never submitted, and groups tied at 0 |
+| A failed submission's grade × 0.5 (`--partial-credit`) | One accepted cut with no stock leaf earns 0.55 against ~0.88 for a solve; halving it keeps solving clearly ahead |
+| `vllm_importance_sampling_mode="token_truncate"`, cap 2 (sync) | TRL's default is one ratio per sequence; over a 16-turn episode it drifts far from 1 and zeroes whole episodes |
+| `epsilon_high=0.28` | DAPO's clip-higher, against entropy collapse |
+| `mask_truncated_completions` (sync) | An episode cut off by the length limit is not a verdict |
+| NaN for a broken session | Infrastructure failure stays out of the group baseline instead of scoring 0 |
+| `solved` and `submitted` logged with weight 0 (sync); `episodes.jsonl` (both) | Pass rate and submission rate beside the reward, so a rising reward can be told apart from reward hacking |
+
+Watch `rewards/solved/mean` and `rewards/submitted/mean` (sync), `reward_std` and
+`frac_reward_zero_std` (how many groups gave no gradient), `entropy`, the clip ratios, and the
+`sampling/importance_sampling_ratio` range. Evaluate checkpoints on core30 with the same harness
+as the board; the base model scores pass@1 0.100 and reward 0.335 there (`base-eval`).
+
 [jobs/](jobs) runs them on HF Jobs the way `05-multi-harness-rl/jobs` does, on `h200x2`: vLLM
 serves the model on one GPU, the trainer runs on the other, and the RetroEnv server runs on CPU
 from the project's locked environment, preparing its serving snapshot from the public bucket

@@ -10,7 +10,7 @@ optimizer. Episodes may be up to `max_staleness` policy versions old when they a
 train/jobs/ starts the RetroEnv server and vLLM and runs this on HF Jobs (see train/README.md).
 """
 
-# %% 1-4. Model, tokenizer, tasks, environment and adapter: shared with sync_grpo.py.
+# %% 1-5. Model, tokenizer, tasks, environment, reward and adapter: shared with sync_grpo.py.
 import json
 import os
 from pathlib import Path
@@ -18,7 +18,12 @@ from pathlib import Path
 from train.sync_grpo import MODEL_REVISIONS, arguments, environment_factory, lora_config, task_dataset, tokenizer_for
 
 
-# %% 5. Configure AsyncGRPO. Batch, lengths and sampling match sync_grpo.py.
+# %% 6. Configure AsyncGRPO. Batch, lengths, sampling and clipping match sync_grpo.py.
+#
+# The rollout process scores each group itself, so the solved/submitted columns of sync_grpo.py
+# are not logged here; episodes.jsonl records both for every episode. AsyncGRPO trains on vLLM's
+# own log-probabilities as the behaviour policy and clips per token, so it needs no separate
+# importance-sampling correction.
 def main():
     args = arguments(__doc__, output="runs/rl/async_grpo")
     output = Path(args.output)
@@ -43,6 +48,7 @@ def main():
         temperature=0.8,
         top_p=1.0,
         top_k=-1,
+        epsilon_high=0.28,
         chat_template_kwargs={"enable_thinking": False, "preserve_thinking": True},
         # Episodes in flight against vLLM and the server, and how stale a trained episode may be.
         max_inflight_tasks=4 if args.smoke else 32,
@@ -73,11 +79,11 @@ def main():
         args=config,
         processing_class=tokenizer,
         train_dataset=dataset,
-        environment_factory=environment_factory(args.server),  # picklable: the rollout process rebuilds it
+        environment_factory=environment_factory(args.server, args.partial_credit),  # rebuilt in the rollout process
         peft_config=lora_config(),
     )
 
-    # %% 6. Train, then save the adapter and tokenizer for evaluation.
+    # %% 7. Train, then save the adapter and tokenizer for evaluation.
     (output / "training_config.json").write_text(json.dumps(config.to_dict(), indent=2, default=str))
     trainer.train()
     trainer.save_model(str(output / "final"))

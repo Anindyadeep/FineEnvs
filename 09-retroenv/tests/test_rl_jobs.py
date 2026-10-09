@@ -126,7 +126,8 @@ def test_tool_results_count_down_the_budget_and_the_trace_records_each_episode(m
     json.loads(env.emit_routes({"routes": []}))
     assert env.get_reward() == 0.6
     records = [json.loads(line) for line in trace.read_text().splitlines()]
-    assert [(r["index"], r["submitted"], r["tool_calls"], r["reward"]) for r in records] == [
-        (0, False, 1, 0.0),
-        (1, True, 1, 0.6),
+    assert [(r["index"], r["submitted"], r["passed"], r["tool_calls"], r["reward"]) for r in records] == [
+        (0, False, False, 1, 0.0),
+        (1, True, True, 1, 0.6),
     ]
+    assert env.submitted and env.passed and not env.failed

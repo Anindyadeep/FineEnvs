@@ -169,9 +169,25 @@ class RemoteRetroRouteEnv:
         self._opening: dict[str, Any] = {}
         self._calls = 0
         self._submitted = False
+        self._passed = False
+
+    @property
+    def submitted(self) -> bool:
+        """Whether this episode called emit_routes."""
+        return self._submitted
+
+    @property
+    def passed(self) -> bool:
+        """Whether the submission solved the task (the server's `valid`)."""
+        return self._passed
+
+    @property
+    def failed(self) -> bool:
+        """Whether the session broke, so the episode has no grade."""
+        return self._failed
 
     def reset(self, split: str = "train", index: int = 0, **_: Any) -> str:
-        self._reward, self._failed, self._calls, self._submitted = 0.0, False, 0, False
+        self._reward, self._failed, self._calls, self._submitted, self._passed = 0.0, False, 0, False, False
         try:
             self._opening = self._client.reset(split=split, index=index)
         except Exception:
@@ -192,6 +208,7 @@ class RemoteRetroRouteEnv:
                 "index": self._opening.get("index"),
                 "reward": None if math.isnan(reward) else reward,
                 "submitted": self._submitted,
+                "passed": self._passed,
                 "tool_calls": self._calls,
                 "failed": self._failed,
             }
@@ -219,6 +236,7 @@ class RemoteRetroRouteEnv:
             payload = {"result": payload}
         if name == "emit_routes":
             self._submitted = True
+            self._passed = bool((payload.get("score") or {}).get("valid"))
         else:
             self._calls += 1
             left = max(0, int(self._opening.get("max_tool_calls", 32)) - self._calls)
