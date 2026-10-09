@@ -19,6 +19,8 @@ uv run python eval/evaluate.py "google/gemma-4-31B-it:novita" --tasks 1    # a o
 
 Any other `run_eval.py` option passes through to every model (`--attempts 3`, `--max-turns 24`).
 
+Without repair, a submission sent as a broken JSON string scores 0, as in training. `eval/regrade.py runs/core30-nothink --server URL` re-grades those final submissions after the harness's repair, through the same server and with no model calls, and writes `results/REPAIR.md` with both scores side by side.
+
 ## One model, one split
 
 `run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The release is fully open: every split, test_id and test_hard included, ships its known routes, and the runs on 30 test_id tasks are under `runs/`. Use dev to pick checkpoints during training and report test_id and test_hard, so test scores never steer training. For a quick board, `--split final_eval` runs the 50-task subset of the two test splits (17 easy, 17 medium, 16 hard); it is served by a server started from the bucket snapshot (`envs/retro_route/openenv/start.sh`, then `--server http://127.0.0.1:8000`).
