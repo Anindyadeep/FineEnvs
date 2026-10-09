@@ -5,13 +5,28 @@ from __future__ import annotations
 import html
 from functools import lru_cache
 from typing import Any
-from urllib.parse import quote
 
 from rdkit import Chem
 from rdkit.Chem.Draw import rdMolDraw2D
 
+from .molecule3d import viewer_url
+
 STYLE = """
 <style>
+/* OpenEnv mounts the playground with its own Gradio theme (a green primary and accent);
+   Gradio 6 ignores a theme passed to Blocks, so these variables give it neutral greys. */
+body .gradio-container {
+  --button-primary-background-fill: #171717; --button-primary-background-fill-hover: #404040;
+  --button-primary-border-color: #171717; --button-primary-text-color: #ffffff;
+  --color-accent: #404040; --color-accent-soft: #f5f5f5; --border-color-accent: #a3a3a3;
+  --checkbox-background-color-selected: #262626; --loader-color: #525252; --slider-color: #525252;
+}
+body.dark .gradio-container {
+  --button-primary-background-fill: #30363d; --button-primary-background-fill-hover: #484f58;
+  --button-primary-border-color: #484f58; --button-primary-text-color: #e6edf3;
+  --color-accent: #c9d1d9; --color-accent-soft: #30363d; --border-color-accent: #6e7781;
+  --checkbox-background-color-selected: #8b949e; --loader-color: #8b949e; --slider-color: #8b949e;
+}
 /* Gradio's own chrome: its footer advertises Gradio rather than the environment. */
 footer { display: none !important; }
 .gradio-container { max-width: 1280px !important; }
@@ -121,7 +136,7 @@ def structure_3d(smiles: str | None, height: int = 300) -> str:
         return wrap('<p class="muted">Start an episode to see the target.</p>')
     return wrap(
         f'<div class="frame"><iframe title="3D structure" loading="lazy" height="{height}" '
-        f'src="/molecule/3d?smiles={quote(smiles, safe="")}"></iframe></div>'
+        f'src="{viewer_url(smiles)}"></iframe></div>'
         '<p class="caption">One RDKit conformer (ETKDG, then MMFF), for shape only.</p>'
     )
 
@@ -134,7 +149,7 @@ def molecule_views(smiles: str | None) -> str:
         f'<p class="caption mono">{html.escape(smiles)}</p>'
         f'<div class="views">{molecule_svg(smiles, 360, 240)}'
         f'<div class="frame"><iframe title="3D structure" loading="lazy" height="240" '
-        f'src="/molecule/3d?smiles={quote(smiles, safe="")}"></iframe></div></div>'
+        f'src="{viewer_url(smiles)}"></iframe></div></div>'
     )
 
 

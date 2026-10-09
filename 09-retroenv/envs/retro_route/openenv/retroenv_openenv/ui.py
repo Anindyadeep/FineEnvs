@@ -21,36 +21,6 @@ from .client import _tool_payload
 from .config import shared_resources
 from .environment import RetroRouteEnvironment
 
-# The explorer's visual language: one neutral grey ramp, flat surfaces, no accent chrome.
-THEME = gr.themes.Base(
-    primary_hue=gr.themes.colors.neutral,
-    secondary_hue=gr.themes.colors.neutral,
-    neutral_hue=gr.themes.colors.neutral,
-    font=("Inter", "ui-sans-serif", "system-ui", "sans-serif"),
-    font_mono=("JetBrains Mono", "ui-monospace", "SFMono-Regular", "monospace"),
-    radius_size=gr.themes.sizes.radius_sm,
-    text_size=gr.themes.sizes.text_sm,
-).set(
-    body_background_fill="*neutral_50",
-    body_background_fill_dark="*neutral_950",
-    block_background_fill="white",
-    block_background_fill_dark="*neutral_900",
-    block_border_width="1px",
-    block_label_background_fill="transparent",
-    block_label_background_fill_dark="transparent",
-    block_shadow="none",
-    block_title_text_weight="500",
-    button_primary_background_fill="*neutral_900",
-    button_primary_background_fill_hover="*neutral_800",
-    button_primary_text_color="white",
-    button_primary_background_fill_dark="*neutral_100",
-    button_primary_text_color_dark="*neutral_950",
-    button_large_radius="*radius_sm",
-    button_small_radius="*radius_sm",
-    input_background_fill="white",
-    input_background_fill_dark="*neutral_900",
-)
-
 
 def _arguments_template(tool: str, target: str) -> dict[str, Any]:
     return {
@@ -263,7 +233,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
             out.append((f"{cut.bond} · {phrase}", ".".join(cut.reactants)))
         return out
 
-    with gr.Blocks(title="RetroEnv", theme=THEME) as demo:
+    with gr.Blocks(title="RetroEnv") as demo:
         session = gr.State(PlaygroundSession())
         gr.HTML(
             render.STYLE
