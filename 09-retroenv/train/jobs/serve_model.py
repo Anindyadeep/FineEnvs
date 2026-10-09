@@ -16,6 +16,7 @@ def main():
     parser.add_argument("--output", required=True)
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--eval", action="store_true", help="Two data-parallel replicas, prefix caching on")
+    parser.add_argument("--trainer", choices=["sync", "async"], default="sync", help="Which trainer syncs weights")
     args = parser.parse_args()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
@@ -48,15 +49,17 @@ def main():
         command += ["--revision", MODEL_REVISIONS[args.model]]
     if not args.eval:
         # Training: the trainer pushes weights over NCCL after each step, and the token ids and
-        # logprobs come back with every completion. Stale prefix-cache entries would outlive a
-        # weight update, so the cache stays off, as in 05-multi-harness-rl.
+        # logprobs come back with every completion. CUDA graphs stay on: in eager mode a 27B
+        # turn took about 11 s. GRPOTrainer resets the prefix cache after every weight update, so
+        # each turn reuses the episode's context; AsyncGRPO pauses and resumes generation around
+        # an update without resetting it, so there the cache stays off.
         command += [
             "--weight-transfer-config", '{"backend":"nccl"}',
             "--logprobs-mode", "processed_logprobs",
             "--return-tokens-as-token-ids",
-            "--enforce-eager",
-            "--no-enable-prefix-caching",
         ]  # fmt: skip
+        if args.trainer == "async":
+            command += ["--no-enable-prefix-caching"]
         os.environ["VLLM_SERVER_DEV_MODE"] = "1"
     os.execvp(command[0], command)
 

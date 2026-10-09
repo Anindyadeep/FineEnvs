@@ -146,6 +146,8 @@ def main():
         command += ["--port", str(engine_port)]
         if args.action == "eval":
             command += ["--eval"] + (["--checkpoint", str(weights)] if weights else [])
+        else:
+            command += ["--trainer", args.mode]
         spawn(
             command, "vllm", {"CUDA_VISIBLE_DEVICES": devices[0] if args.action == "train" else ",".join(devices[:2])}
         )
