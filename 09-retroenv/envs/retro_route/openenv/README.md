@@ -8,6 +8,8 @@ app_port: 8000
 base_path: /web
 pinned: false
 tags: [openenv, chemistry, retrosynthesis, tool-use]
+datasets:
+  - LiteFold/RetroEnv
 short_description: Plan retrosynthesis routes with verifier-backed rewards.
 ---
 
