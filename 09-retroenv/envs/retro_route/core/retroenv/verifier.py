@@ -381,6 +381,11 @@ def _rejected(errors: list[str]) -> ScoreResult:
     )
 
 
+def prepare_stock(stock: frozenset[str]) -> frozenset[str]:
+    """Canonicalize a serving stock ahead of the first episode scored against it (cached per stock)."""
+    return _canonical_stock(stock)
+
+
 def _canonical_stock(stock: Iterable[str]) -> frozenset[str]:
     if isinstance(stock, frozenset):
         return _canonicalize_frozen(stock)

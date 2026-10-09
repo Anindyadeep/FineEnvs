@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass
 from functools import lru_cache
 from typing import Any, Iterable
@@ -68,15 +69,35 @@ class PrecedentIndex:
                     keys=frozenset(keys),
                 )
             )
-        self.records = tuple(records)
+        generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+        self._finish(tuple(records), [generator.GetFingerprint(Chem.MolFromSmiles(r.product)) for r in records])
+
+    @classmethod
+    def from_records(
+        cls, records: Iterable[Precedent], fingerprints: Iterable[Any], rules: LeakageRules | None = None
+    ) -> "PrecedentIndex":
+        """Rebuild from a serving index: the records and fingerprints ``__init__`` would compute."""
+        index = cls.__new__(cls)
+        index.rules = rules or LeakageRules()
+        index._finish(tuple(records), list(fingerprints))
+        return index
+
+    def _finish(self, records: tuple[Precedent, ...], fingerprints: list[Any]) -> None:
+        if len(records) != len(fingerprints):
+            raise ValueError(f"{len(records)} precedents but {len(fingerprints)} fingerprints")
+        self.records = records
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-        self._fingerprints = [self._generator.GetFingerprint(Chem.MolFromSmiles(r.product)) for r in self.records]
+        self._fingerprints = fingerprints
         self._classes = np.array([_normalize_class(r.reaction_class) for r in self.records])
         self._key_index: dict[Key, list[int]] = {}
         for index, record in enumerate(self.records):
             for key in record.keys:
                 self._key_index.setdefault(key, []).append(index)
         self._hidden: dict[tuple[str, str], np.ndarray] = {}
+
+    def fingerprints(self) -> list[Any]:
+        """Product fingerprints in record order, for writing a serving index."""
+        return list(self._fingerprints)
 
     def hidden(self, task: RetroTask) -> np.ndarray:
         """Boolean mask of records sharing a leakage key with ``task`` or near-duplicating one of its molecules."""
@@ -141,12 +162,52 @@ class StockIndex:
     """The only stock surface: exact, InChIKey, class, SMARTS, or similarity."""
 
     def __init__(self, stock: Iterable[str]):
-        self.smiles = tuple(sorted({canonicalize_smiles(item) for item in stock}))
-        self.molecules = tuple(Chem.MolFromSmiles(item) for item in self.smiles)
+        smiles = tuple(sorted({canonicalize_smiles(item) for item in stock}))
+        molecules = tuple(Chem.MolFromSmiles(item) for item in smiles)
+        generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
+        self._finish(smiles, tuple(generator.GetFingerprint(molecule) for molecule in molecules), molecules)
+
+    @classmethod
+    def from_canonical(cls, smiles: Iterable[str], fingerprints: Iterable[Any]) -> "StockIndex":
+        """Rebuild from a serving index: sorted canonical SMILES and their fingerprints.
+
+        Molecules are parsed only when a class or substructure query first needs them;
+        exact, InChIKey and similarity search never do, and parsing them all costs about a
+        gigabyte for this stock.
+        """
+        index = cls.__new__(cls)
+        index._finish(tuple(smiles), tuple(fingerprints), None)
+        if list(index.smiles) != sorted(index.smiles):
+            raise ValueError("stock SMILES must be sorted, as StockIndex orders them")
+        return index
+
+    def _finish(self, smiles: tuple[str, ...], fingerprints: tuple[Any, ...], molecules: tuple | None) -> None:
+        if len(smiles) != len(fingerprints):
+            raise ValueError(f"{len(smiles)} stock molecules but {len(fingerprints)} fingerprints")
+        self.smiles = smiles
+        self._molecules = molecules
+        self._molecules_lock = threading.Lock()
         self._known = frozenset(self.smiles)
         self._by_inchikey: dict[str, str] | None = None  # built on the first InChIKey query; InChI is slow
         self._generator = rdFingerprintGenerator.GetMorganGenerator(radius=2, fpSize=2048)
-        self._fingerprints = tuple(self._generator.GetFingerprint(molecule) for molecule in self.molecules)
+        self._fingerprints = fingerprints
+
+    @property
+    def known(self) -> frozenset[str]:
+        """The stock as one shared set; sessions reuse it instead of rebuilding it per episode."""
+        return self._known
+
+    @property
+    def molecules(self) -> tuple:
+        if self._molecules is None:
+            with self._molecules_lock:
+                if self._molecules is None:
+                    self._molecules = tuple(Chem.MolFromSmiles(item) for item in self.smiles)
+        return self._molecules
+
+    def fingerprints(self) -> tuple[Any, ...]:
+        """Fingerprints in SMILES order, for writing a serving index."""
+        return self._fingerprints
 
     @staticmethod
     @lru_cache(maxsize=100_000)
@@ -211,10 +272,19 @@ class StockIndex:
         }
 
 
+_PRELOADED_STOCKS: dict[frozenset[str], StockIndex] = {}
+
+
+def register_stock_index(index: StockIndex) -> frozenset[str]:
+    """Make a prebuilt index (from a serving index) the one ``cached_stock_index`` returns for its stock."""
+    _PRELOADED_STOCKS[index.known] = index
+    return index.known
+
+
 @lru_cache(maxsize=8)
 def cached_stock_index(stock: frozenset[str]) -> StockIndex:
     """Build fingerprints once for an immutable serving stock snapshot."""
-    return StockIndex(stock)
+    return _PRELOADED_STOCKS.get(stock) or StockIndex(stock)
 
 
 def molecule_lookup(query: str, cache: dict[str, dict[str, Any]] | None = None) -> dict[str, Any]:

@@ -81,3 +81,18 @@ class TaskStore:
     def iter_all(self) -> Iterable[RetroTask]:
         for split in self.splits():
             yield from self.tasks(split)
+
+    def position(self, split: str, task_id: str) -> int | None:
+        for index, task in enumerate(self.tasks(split)):
+            if task.task_id == task_id:
+                return index
+        return None
+
+    def find(self, task_id: str) -> RetroTask | None:
+        for task in self.iter_all():
+            if task.task_id == task_id:
+                return task
+        return None
+
+    def stock_ids(self) -> list[str]:
+        return sorted(path.stem for path in self.stocks_dir.glob("*.smi"))

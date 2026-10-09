@@ -183,10 +183,9 @@ class RetroRouteEnvironment(MCPEnvironment):
         if not tasks:
             raise IndexError(f"split {split!r} contains no tasks")
         if task_id is not None:
-            positions = [i for i, task in enumerate(tasks) if task.task_id == task_id]
-            if not positions:
+            index = store.position(split, task_id)
+            if index is None:
                 raise KeyError(f"task {task_id!r} is not in split {split!r}")
-            index = positions[0]
         elif index is None:
             index = int(seed) % len(tasks) if seed is not None else self._rng.randrange(len(tasks))
         index = int(index)

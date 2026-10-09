@@ -9,6 +9,12 @@ Layout (the Hugging Face dataset repo root)::
     library/templates.json        retro-template counts from every corpus reaction
     library/templates-visible.json  retro-template counts from train-visible reactions only
     library/reagents.json         common reagents tolerated as extra precursors
+
+A prepared directory may add two things beside the release files (see ``serving``):
+
+    serving/serving.sqlite        the serving index; when present, tasks, stock and
+                                  precedents load from it instead of being recomputed
+    evalsets/<name>.json          frozen evaluation sets, each served as a split
 """
 
 from __future__ import annotations
@@ -20,16 +26,18 @@ from pathlib import Path
 from typing import Any
 
 from .environment import RetroRouteSession
+from .evalsets import EvalsetStore, load_evalset
 from .leakage import LeakageRules
 from .reactions import DEFAULT_MIN_COUNT, ReactionLibrary, iter_reactions
 from .retrieval import PrecedentIndex
+from .serving import INDEX_FILE, ServingIndex
 from .store import TaskStore
 
 
 @dataclass
 class Benchmark:
     root: Path
-    store: TaskStore
+    store: Any  # TaskStore, SqliteTaskStore, or either wrapped in EvalsetStore
     manifest: dict[str, Any]
     rules: LeakageRules
     library: ReactionLibrary
@@ -58,14 +66,25 @@ class Benchmark:
             reagents,
             min_count=min_count,
         )
+        index_path = root / "serving" / INDEX_FILE
+        if index_path.exists():
+            index = ServingIndex(index_path)
+            store: Any = index.task_store()
+            precedents = index.precedents(rules, library_dir / "reactions.jsonl.gz")
+        else:
+            store = TaskStore(root / "tasks-private", root / "stocks")
+            precedents = PrecedentIndex(rows, rules)
+        evalsets = [load_evalset(path) for path in sorted((root / "evalsets").glob("*.json"))]
+        if evalsets:
+            store = EvalsetStore(store, evalsets)
         return cls(
             root=root,
-            store=TaskStore(root / "tasks-private", root / "stocks"),
+            store=store,
             manifest=manifest,
             rules=rules,
             library=library,
             tool_library=tool_library,
-            precedents=PrecedentIndex(rows, rules),
+            precedents=precedents,
         )
 
     def session(self, **kwargs: Any) -> RetroRouteSession:

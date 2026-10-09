@@ -20,6 +20,7 @@ from retroenv.environment import RetroRouteSession
 from retroenv.retrieval import cached_stock_index
 from retroenv.store import TaskStore
 from retroenv.tools import tool_names
+from retroenv.verifier import prepare_stock
 
 ENV_NAME = "retro_route"
 
@@ -66,7 +67,7 @@ class Resources:
     pubchem_cache: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     @property
-    def store(self) -> TaskStore:
+    def store(self) -> TaskStore:  # or SqliteTaskStore / EvalsetStore: the same interface
         return self.benchmark.store
 
     @classmethod
@@ -77,9 +78,10 @@ class Resources:
             raise RuntimeError(f"no task splits found in {settings.benchmark_dir}")
         if settings.default_split not in splits:
             raise RuntimeError(f"default split {settings.default_split!r} is not among {splits}")
-        # Canonicalize every stock once, so the first reset is not slow.
-        for stock_id in sorted({task.stock_id for task in benchmark.store.iter_all()}):
-            cached_stock_index(benchmark.store.stock(stock_id))
+        # Index every stock and canonicalize it for the verifier once, so no episode pays for it.
+        for stock_id in benchmark.store.stock_ids():
+            stock = benchmark.store.stock(stock_id)
+            prepare_stock(cached_stock_index(stock).known)
         return cls(settings=settings, benchmark=benchmark, pubchem_cache=_load_pubchem_cache(settings.pubchem_cache))
 
     def session(self) -> RetroRouteSession:

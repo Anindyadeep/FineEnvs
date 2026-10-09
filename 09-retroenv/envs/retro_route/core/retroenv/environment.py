@@ -106,7 +106,7 @@ class RetroRouteSession:
         self.task = task
         raw_stock = stock if isinstance(stock, frozenset) else frozenset(stock)
         self.stock_index = cached_stock_index(raw_stock)
-        self.stock = frozenset(self.stock_index.smiles)
+        self.stock = self.stock_index.known  # one shared set, so the verifier's per-stock cache hits
         self.excluded = frozenset(canonicalize_smiles(item) for item in task.constraints.excluded_stock)
         # A train task must not confirm its own known reactions by corpus lookup.
         self._own_reactions = frozenset(
