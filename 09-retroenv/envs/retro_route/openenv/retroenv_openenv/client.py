@@ -170,6 +170,7 @@ class RemoteRetroRouteEnv:
         self._calls = 0
         self._submitted = False
         self._passed = False
+        self._failure: str | None = None
 
     @property
     def submitted(self) -> bool:
@@ -188,6 +189,7 @@ class RemoteRetroRouteEnv:
 
     def reset(self, split: str = "train", index: int = 0, **_: Any) -> str:
         self._reward, self._failed, self._calls, self._submitted, self._passed = 0.0, False, 0, False, False
+        self._failure = None
         try:
             self._opening = self._client.reset(split=split, index=index)
         except Exception:
@@ -209,6 +211,7 @@ class RemoteRetroRouteEnv:
                 "reward": None if math.isnan(reward) else reward,
                 "submitted": self._submitted,
                 "passed": self._passed,
+                "failure": self._failure,  # the grader's first hard failure, when the submission failed
                 "tool_calls": self._calls,
                 "failed": self._failed,
             }
@@ -236,7 +239,10 @@ class RemoteRetroRouteEnv:
             payload = {"result": payload}
         if name == "emit_routes":
             self._submitted = True
-            self._passed = bool((payload.get("score") or {}).get("valid"))
+            score = payload.get("score") or {}
+            self._passed = bool(score.get("valid"))
+            failures = score.get("hard_failures") or ([payload["error"]] if "error" in payload else [])
+            self._failure = str(failures[0])[:160] if failures and not self._passed else None
         else:
             self._calls += 1
             left = max(0, int(self._opening.get("max_tool_calls", 32)) - self._calls)

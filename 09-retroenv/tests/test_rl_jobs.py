@@ -93,7 +93,9 @@ class _LiveClient(_DeadClient):
         from retroenv_openenv.client import ToolOutcome
 
         if name == "emit_routes":
-            return ToolOutcome(name=name, result={"score": {"valid": True}}, done=True, reward=0.6, error=None)
+            return ToolOutcome(
+                name=name, result={"score": {"valid": True, "hard_failures": []}}, done=True, reward=0.6, error=None
+            )
         return ToolOutcome(name=name, result={"matches": []}, done=False, reward=None, error=None)
 
 
@@ -131,3 +133,4 @@ def test_tool_results_count_down_the_budget_and_the_trace_records_each_episode(m
         (1, True, True, 1, 0.6),
     ]
     assert env.submitted and env.passed and not env.failed
+    assert all(r["failure"] is None for r in records)  # unsubmitted and solved episodes carry no grader failure
