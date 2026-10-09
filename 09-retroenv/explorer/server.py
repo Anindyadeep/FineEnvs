@@ -88,7 +88,9 @@ class Release:
                 for line in path.open(encoding="utf-8"):
                     task = json.loads(line)
                     self.tasks[task["task_id"]] = task
-        self.rows = sorted((self._row(t) for t in self.tasks.values()), key=lambda r: (SPLITS.index(r["split"]), r["id"]))
+        self.rows = sorted(
+            (self._row(t) for t in self.tasks.values()), key=lambda r: (SPLITS.index(r["split"]), r["id"])
+        )
         self._stock: frozenset[str] | None = None
         self._stock_lock = threading.Lock()
 
@@ -149,11 +151,19 @@ def release(name: str) -> Release:
 def meta() -> dict[str, Any]:
     return {
         "benchmarks": [
-            {"name": n, "splits": dict(Counter(r["split"] for r in b.rows)), "manifest": {k: b.manifest.get(k) for k in ("source", "stock", "library")}}
+            {
+                "name": n,
+                "splits": dict(Counter(r["split"] for r in b.rows)),
+                "manifest": {k: b.manifest.get(k) for k in ("source", "stock", "library")},
+            }
             for n, b in STATE["releases"].items()
         ],
         "tools": [
-            {"name": t["function"]["name"], "description": t["function"]["description"], "assist": t["function"]["name"] in ASSIST_TOOLS}
+            {
+                "name": t["function"]["name"],
+                "description": t["function"]["description"],
+                "assist": t["function"]["name"] in ASSIST_TOOLS,
+            }
             for t in TOOLS
         ],
         "weights": WEIGHTS,
@@ -220,7 +230,13 @@ def tasks(
 def disconnections(smi: str) -> list[dict[str, Any]]:
     """Rule-based candidate cuts of a molecule, to try in live play."""
     return [
-        {"reactants": list(d.reactants), "bond": d.bond, "family": d.family, "score": d.score, "text": describe(d.family, d.reactants, smi)}
+        {
+            "reactants": list(d.reactants),
+            "bond": d.bond,
+            "family": d.family,
+            "score": d.score,
+            "text": describe(d.family, d.reactants, smi),
+        }
         for d in strategic_disconnections(smi)[:8]
     ]
 
@@ -609,7 +625,9 @@ def main() -> None:
     STATE["runs"] = args.runs.resolve()
     with socket.socket() as probe:
         if probe.connect_ex(("127.0.0.1", args.port)) == 0:
-            raise SystemExit(f"port {args.port} is in use; open http://127.0.0.1:{args.port} or pass --port {args.port + 1}")
+            raise SystemExit(
+                f"port {args.port} is in use; open http://127.0.0.1:{args.port} or pass --port {args.port + 1}"
+            )
     STATE["releases"] = discover(args.release)
     if not STATE["releases"]:
         raise SystemExit("no release found: build one with `uv run python -m dataset.build_release` or pass --release")

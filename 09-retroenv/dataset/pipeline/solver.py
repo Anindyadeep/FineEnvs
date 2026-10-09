@@ -59,8 +59,10 @@ class RouteGraph:
                 if value > max_depth:
                     continue
                 current = depth.get(reaction.product)
-                if current is None or value < current or (
-                    value == current and self._better(index, choice.get(reaction.product))
+                if (
+                    current is None
+                    or value < current
+                    or (value == current and self._better(index, choice.get(reaction.product)))
                 ):
                     if current != value or choice.get(reaction.product) != index:
                         changed = True
@@ -76,8 +78,14 @@ class RouteGraph:
         a, b = self.reactions[index], self.reactions[incumbent]
         return (-a.popularity, a.reactants) < (-b.popularity, b.reactants)
 
-    def witness(self, target: str, depth: dict[str, int] | None = None, choice: dict[str, int] | None = None,
-                stock: frozenset[str] | None = None, first: int | None = None) -> list[Step]:
+    def witness(
+        self,
+        target: str,
+        depth: dict[str, int] | None = None,
+        choice: dict[str, int] | None = None,
+        stock: frozenset[str] | None = None,
+        first: int | None = None,
+    ) -> list[Step]:
         """Steps of the chosen route for ``target`` (optionally forcing its first reaction)."""
         depth = self.depth if depth is None else depth
         choice = self.choice if choice is None else choice
@@ -119,8 +127,14 @@ class RouteGraph:
             frontier = following
         return sorted(found)
 
-    def solve(self, target: str, *, excluded: frozenset[str] = frozenset(), forbidden: frozenset[str] = frozenset(),
-              indexes: list[int] | None = None) -> tuple[int, list[Step]] | None:
+    def solve(
+        self,
+        target: str,
+        *,
+        excluded: frozenset[str] = frozenset(),
+        forbidden: frozenset[str] = frozenset(),
+        indexes: list[int] | None = None,
+    ) -> tuple[int, list[Step]] | None:
         """Shortest route for ``target`` without the excluded stock and forbidden classes."""
         indexes = self.subgraph(target) if indexes is None else indexes
         stock = self.stock - excluded
@@ -140,7 +154,9 @@ class RouteGraph:
             value = 1 + max(inner)
             if value <= max_depth:
                 cuts.append((value, index))
-        return sorted(cuts, key=lambda item: (item[0], -self.reactions[item[1]].popularity, self.reactions[item[1]].reactants))
+        return sorted(
+            cuts, key=lambda item: (item[0], -self.reactions[item[1]].popularity, self.reactions[item[1]].reactants)
+        )
 
 
 def steps_depth(target: str, steps: list[Step]) -> int:

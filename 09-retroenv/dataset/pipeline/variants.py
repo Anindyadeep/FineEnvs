@@ -80,18 +80,31 @@ def _variants(candidate: Candidate) -> list[TaskSpec]:
     known = (candidate.witness, patent.steps)
     used = [{_CLASS[step] for step in steps} for steps in known]
     root_first = sorted(candidate.witness, key=lambda step: step[0] != target)
-    classes = [c for c in dict.fromkeys(_CLASS[s] for s in root_first) if c in CONSTRAINABLE_CLASSES and all(c in u for u in used)]
+    classes = [
+        c
+        for c in dict.fromkeys(_CLASS[s] for s in root_first)
+        if c in CONSTRAINABLE_CLASSES and all(c in u for u in used)
+    ]
     for reaction_class in classes:
         solved = graph.solve(target, forbidden=frozenset({reaction_class}), indexes=indexes)
         if solved and solved[0] <= MAX_DEPTH and valid_witness(target, solved[1], graph.stock, budget(solved[0])):
             specs.append(
-                TaskSpec(candidate, "forbidden_class", budget(solved[0]), [solved[1]],
-                         forbidden_classes=(reaction_class,), constrained_min_depth=solved[0])
+                TaskSpec(
+                    candidate,
+                    "forbidden_class",
+                    budget(solved[0]),
+                    [solved[1]],
+                    forbidden_classes=(reaction_class,),
+                    constrained_min_depth=solved[0],
+                )
             )
             break
 
     blocks = [
-        sorted((leaf for leaf in steps_leaves(target, steps) if _heavy(leaf) >= MIN_BUILDING_BLOCK_HEAVY), key=lambda leaf: (-_heavy(leaf), leaf))
+        sorted(
+            (leaf for leaf in steps_leaves(target, steps) if _heavy(leaf) >= MIN_BUILDING_BLOCK_HEAVY),
+            key=lambda leaf: (-_heavy(leaf), leaf),
+        )
         for steps in known
     ]
     shared = [leaf for leaf in blocks[0] if leaf in blocks[1]]
@@ -100,10 +113,20 @@ def _variants(candidate: Candidate) -> list[TaskSpec]:
         options.append(frozenset({blocks[0][0], blocks[1][0]}))
     for excluded in options:
         solved = graph.solve(target, excluded=excluded, indexes=indexes)
-        if solved and solved[0] <= MAX_DEPTH and valid_witness(target, solved[1], graph.stock - excluded, budget(solved[0])):
+        if (
+            solved
+            and solved[0] <= MAX_DEPTH
+            and valid_witness(target, solved[1], graph.stock - excluded, budget(solved[0]))
+        ):
             specs.append(
-                TaskSpec(candidate, "restricted_stock", budget(solved[0]), [solved[1]],
-                         excluded_stock=tuple(sorted(excluded)), constrained_min_depth=solved[0])
+                TaskSpec(
+                    candidate,
+                    "restricted_stock",
+                    budget(solved[0]),
+                    [solved[1]],
+                    excluded_stock=tuple(sorted(excluded)),
+                    constrained_min_depth=solved[0],
+                )
             )
             break
 
@@ -121,14 +144,21 @@ def _variants(candidate: Candidate) -> list[TaskSpec]:
         wanted = 3 if len(witnesses) >= 3 and int(stable_order("diversity", target), 16) % 3 == 0 else 2
         chosen = witnesses[:wanted]
         specs.append(
-            TaskSpec(candidate, "diversity", budget(depth), chosen, min_routes=wanted,
-                     constrained_min_depth=max(steps_depth(target, steps) for steps in chosen))
+            TaskSpec(
+                candidate,
+                "diversity",
+                budget(depth),
+                chosen,
+                min_routes=wanted,
+                constrained_min_depth=max(steps_depth(target, steps) for steps in chosen),
+            )
         )
     return specs
 
 
-def generate(candidates: list[Candidate], graph: RouteGraph, step_class: dict[Step, str],
-             workers: int = WORKERS) -> list[TaskSpec]:
+def generate(
+    candidates: list[Candidate], graph: RouteGraph, step_class: dict[Step, str], workers: int = WORKERS
+) -> list[TaskSpec]:
     global _GRAPH, _CLASS
     _GRAPH, _CLASS = graph, step_class
     with Pool(workers) as pool:
@@ -136,8 +166,13 @@ def generate(candidates: list[Candidate], graph: RouteGraph, step_class: dict[St
 
 
 def standard(candidate: Candidate) -> TaskSpec:
-    return TaskSpec(candidate, "standard", budget(candidate.min_depth), [candidate.witness],
-                    constrained_min_depth=candidate.min_depth)
+    return TaskSpec(
+        candidate,
+        "standard",
+        budget(candidate.min_depth),
+        [candidate.witness],
+        constrained_min_depth=candidate.min_depth,
+    )
 
 
 def cap_variants(specs: list[TaskSpec], split_of: dict[str, str]) -> tuple[list[TaskSpec], dict]:

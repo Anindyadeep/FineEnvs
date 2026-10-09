@@ -45,7 +45,9 @@ def describe_constraints(task: RetroTask) -> str:
         )
     if task.constraints.excluded_stock:
         names = ", ".join(task.constraints.excluded_stock)
-        lines.append(f"These building blocks are unavailable for this task and stock_retrieve will not return them: {names}.")
+        lines.append(
+            f"These building blocks are unavailable for this task and stock_retrieve will not return them: {names}."
+        )
     if task.min_routes > 1:
         lines.append(f"Return at least {task.min_routes} valid routes with different first disconnections.")
     return "".join(f"\nConstraint: {line}" for line in lines)
@@ -109,9 +111,11 @@ class RetroRouteSession:
         self.stock = self.stock_index.known  # one shared set, so the verifier's per-stock cache hits
         self.excluded = frozenset(canonicalize_smiles(item) for item in task.constraints.excluded_stock)
         # A train task must not confirm its own known reactions by corpus lookup.
-        self._own_reactions = frozenset(
-            free_key(step.product, step.reactants) for route in task.reference_routes for step in route.steps
-        ) if task.split == "train" else frozenset()
+        self._own_reactions = (
+            frozenset(free_key(step.product, step.reactants) for route in task.reference_routes for step in route.steps)
+            if task.split == "train"
+            else frozenset()
+        )
         self.episode_id = episode_id or str(uuid.uuid4())
         self.tool_calls = 0
         self.done = False
@@ -165,7 +169,9 @@ class RetroRouteSession:
             query, mode=mode, limit=min(limit, self.max_search_results), excluded=self.excluded
         )
 
-    def reaction_precedent_search(self, product_smiles: str = "", reaction_class: str = "", limit: int = 10) -> dict[str, Any]:
+    def reaction_precedent_search(
+        self, product_smiles: str = "", reaction_class: str = "", limit: int = 10
+    ) -> dict[str, Any]:
         """Capped analogues from the train-visible reaction corpus."""
         blocked = self._consume("reaction_precedent_search")
         if blocked:
@@ -230,7 +236,11 @@ class RetroRouteSession:
         return {
             "reaction_class": reaction_class or None,
             "conditions": [
-                {"analogue_product": row["product_smiles"], "reagents": row["reagents"], "similarity": row["similarity"]}
+                {
+                    "analogue_product": row["product_smiles"],
+                    "reagents": row["reagents"],
+                    "similarity": row["similarity"],
+                }
                 for row in result.get("results", [])
             ],
             "source": "train-visible analogues",

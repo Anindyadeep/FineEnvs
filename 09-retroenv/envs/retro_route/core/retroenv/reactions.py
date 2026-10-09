@@ -234,9 +234,7 @@ class ReactionLibrary:
             stereo_match = set(canonicalize_components(outcome)) <= set(stereo_reactants)
         except ChemistryError:
             stereo_match = None
-        return StepSupport(
-            "template", product_key, reactant_key, int(self.index.counts[template_id]), stereo_match
-        )
+        return StepSupport("template", product_key, reactant_key, int(self.index.counts[template_id]), stereo_match)
 
     def _in_corpus(self, key: StepKey, exclude: frozenset[StepKey]) -> bool:
         product, reactants = key
@@ -249,8 +247,14 @@ class ReactionLibrary:
         return False
 
     @classmethod
-    def load(cls, directory: str | Path, *, templates: str = "templates.json", visible_only: bool = False,
-             min_count: int = DEFAULT_MIN_COUNT) -> "ReactionLibrary":
+    def load(
+        cls,
+        directory: str | Path,
+        *,
+        templates: str = "templates.json",
+        visible_only: bool = False,
+        min_count: int = DEFAULT_MIN_COUNT,
+    ) -> "ReactionLibrary":
         root = Path(directory)
         corpus = (
             (record["product"], tuple(record["reactants"]))

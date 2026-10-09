@@ -58,7 +58,9 @@ def main(argv: list[str] | None = None) -> int:
     started = time.time()
     build = args.build_dir
 
-    reactions, routes, _ = cached(build / "flat.pkl", lambda: paroutes.flatten(paroutes.load_archive(args.raw_dir / ARCHIVE)))
+    reactions, routes, _ = cached(
+        build / "flat.pkl", lambda: paroutes.flatten(paroutes.load_archive(args.raw_dir / ARCHIVE))
+    )
     log(f"flattened {len(routes)} routes, {len(reactions)} unique reactions", started)
     annotated = cached(build / "annotated.pkl", lambda: library.annotate(reactions))
     log("annotated reactions (class, template, map flags)", started)
@@ -71,7 +73,10 @@ def main(argv: list[str] | None = None) -> int:
     ]
     clean = {(r.product, r.reactants) for r in graph_reactions}
     graph = solver.RouteGraph(graph_reactions, stock)
-    log(f"route graph: {len(graph_reactions)} clean reactions, {len(stock)} stock molecules, {len(graph.depth)} solved molecules", started)
+    log(
+        f"route graph: {len(graph_reactions)} clean reactions, {len(stock)} stock molecules, {len(graph.depth)} solved molecules",
+        started,
+    )
 
     rows, template_counts, reagent_counts = library.library_rows(reactions, annotated)
     reagents = library.reagent_whitelist(reagent_counts)
@@ -84,11 +89,15 @@ def main(argv: list[str] | None = None) -> int:
         for key in reactions
     }
     step_templates = {key: template_counts.get(annotated[key].template, 0) for key in reactions}
-    log(f"library: {len(rows)} stereo-free reactions, {len(template_counts)} templates, {len(reagents)} reagents", started)
+    log(
+        f"library: {len(rows)} stereo-free reactions, {len(template_counts)} templates, {len(reagents)} reagents",
+        started,
+    )
 
     by_target = paroutes.group_routes(routes)
     molecules = set(by_target) | {r.product for r in graph_reactions} | {row["product_smiles"] for row in rows}
     features = cached(build / "molecule_features.pkl", lambda: targets.molecule_features(molecules))
+
     def candidates_with_neighbours():
         found, funnel = targets.build_candidates(by_target, graph, clean, step_templates, features)
         targets.add_neighbour_features(found)
@@ -123,7 +132,9 @@ def main(argv: list[str] | None = None) -> int:
         extra_molecules |= molecules
     splits.extend_held_out(assignment, candidates, keys, extra_keys, extra_molecules)
     train = [c for c in candidates if assignment.split_of.get(c.task_id) == "train"]
-    train_specs = [s for s in variants.generate(train, graph, step_class) if not witness_keys(s)[0] & assignment.held_out_keys]
+    train_specs = [
+        s for s in variants.generate(train, graph, step_class) if not witness_keys(s)[0] & assignment.held_out_keys
+    ]
     log(f"held-out variant witnesses barred {assignment.report['barred_by_held_out_variants']} train targets", started)
     assigned = held + train
     specs, variant_report = variants.cap_variants(held_specs + train_specs, assignment.split_of)
@@ -148,7 +159,9 @@ def main(argv: list[str] | None = None) -> int:
         row.pop("clean")
     log(f"library visibility: {sum(r['visible'] for r in rows)} of {len(rows)} reactions train-visible", started)
 
-    rows_by_split = release.by_split([release.task_row(spec, assignment.split_of[spec.candidate.task_id], meta) for spec in specs])
+    rows_by_split = release.by_split(
+        [release.task_row(spec, assignment.split_of[spec.candidate.task_id], meta) for spec in specs]
+    )
     out = args.output_dir
     out.mkdir(parents=True, exist_ok=True)
     release.write_tasks(out, rows_by_split)
@@ -177,12 +190,22 @@ def main(argv: list[str] | None = None) -> int:
             "constrainable_classes": list(CONSTRAINABLE_CLASSES),
         },
         "leakage": {
-            "keys": ["patent", "molecule (target and route intermediates)", "reaction", "scaffold group", "near-duplicate"],
+            "keys": [
+                "patent",
+                "molecule (target and route intermediates)",
+                "reaction",
+                "scaffold group",
+                "near-duplicate",
+            ],
             "generic_scaffolds": sorted(generic),
             "near_duplicate_threshold": targets.NEAR_DUPLICATE,
         },
         "design": {
-            "target_filters": {"heavy_atoms": [targets.MIN_HEAVY, targets.MAX_HEAVY], "min_depth": [targets.MIN_DEPTH, solver.MAX_DEPTH], "no_metal": True},
+            "target_filters": {
+                "heavy_atoms": [targets.MIN_HEAVY, targets.MAX_HEAVY],
+                "min_depth": [targets.MIN_DEPTH, solver.MAX_DEPTH],
+                "no_metal": True,
+            },
             "held_out_size": splits.SPLIT_SIZE,
             "depth_quotas": splits.DEPTH_QUOTAS,
             "test_hard_rule": splits.HARD_RULE,

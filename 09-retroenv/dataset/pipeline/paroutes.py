@@ -65,7 +65,9 @@ def _walk(node: dict, out: list[tuple[str, list[str], str, str]]) -> None:
 
 
 def _depth(node: dict) -> int:
-    return max((1 + max((_depth(c) for c in r.get("children", [])), default=0) for r in node.get("children", [])), default=0)
+    return max(
+        (1 + max((_depth(c) for c in r.get("children", [])), default=0) for r in node.get("children", [])), default=0
+    )
 
 
 def _leaves(node: dict, out: set[str]) -> None:
@@ -81,7 +83,9 @@ def load_archive(path: Path) -> list[dict]:
         return json.load(handle)
 
 
-def flatten(archive: list[dict]) -> tuple[dict[tuple[str, tuple[str, ...]], Reaction], list[Route], dict[str, str | None]]:
+def flatten(
+    archive: list[dict],
+) -> tuple[dict[tuple[str, tuple[str, ...]], Reaction], list[Route], dict[str, str | None]]:
     """Canonical unique reactions, canonical routes, and the raw->canonical molecule map."""
     raw_routes = []
     molecules: set[str] = set()

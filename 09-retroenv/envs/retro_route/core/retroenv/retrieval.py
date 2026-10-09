@@ -248,7 +248,9 @@ class StockIndex:
                 pattern = Chem.MolFromSmarts(smarts)
                 if pattern is None:
                     raise ValueError("invalid SMARTS query")
-                matches = [(1.0, s) for s, molecule in zip(self.smiles, self.molecules) if molecule.HasSubstructMatch(pattern)]
+                matches = [
+                    (1.0, s) for s, molecule in zip(self.smiles, self.molecules) if molecule.HasSubstructMatch(pattern)
+                ]
             elif mode == "similarity":
                 query_fp = self._generator.GetFingerprint(Chem.MolFromSmiles(canonicalize_smiles(query)))
                 values = DataStructs.BulkTanimotoSimilarity(query_fp, self._fingerprints)

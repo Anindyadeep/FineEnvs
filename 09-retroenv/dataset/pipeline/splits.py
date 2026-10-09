@@ -199,5 +199,7 @@ def _quotas(shares: dict[int, float], size: int) -> dict[int, int]:
 
 def near_duplicate_hits(smiles: list[str], queries: set[str], workers: int = WORKERS) -> set[str]:
     """Members of ``smiles`` within Tanimoto 0.90 of any query molecule."""
-    found = similarity.above(similarity.packed(sorted(queries), workers), similarity.packed(smiles, workers), NEAR_DUPLICATE, workers)
+    found = similarity.above(
+        similarity.packed(sorted(queries), workers), similarity.packed(smiles, workers), NEAR_DUPLICATE, workers
+    )
     return {smiles[i] for i in found}

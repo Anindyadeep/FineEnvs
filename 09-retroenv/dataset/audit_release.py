@@ -212,7 +212,19 @@ def main(argv: list[str] | None = None) -> int:
     report["probes"] = check_probes(benchmark)
     report["passed"] = not any(section["failures"] for section in report.values() if isinstance(section, dict))
     (args.release / "audit.json").write_text(json.dumps(report, indent=1, sort_keys=True) + "\n")
-    print(json.dumps({k: (v if k == "passed" else {kk: vv for kk, vv in v.items() if kk != "failures"} | {"failures": v["failures"][:5]}) for k, v in report.items()}, indent=1))
+    print(
+        json.dumps(
+            {
+                k: (
+                    v
+                    if k == "passed"
+                    else {kk: vv for kk, vv in v.items() if kk != "failures"} | {"failures": v["failures"][:5]}
+                )
+                for k, v in report.items()
+            },
+            indent=1,
+        )
+    )
     return 0 if report["passed"] else 1
 
 

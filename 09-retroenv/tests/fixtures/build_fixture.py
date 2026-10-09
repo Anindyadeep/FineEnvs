@@ -48,7 +48,10 @@ def main() -> int:
     tasks = [row for rows in rows_by_split.values() for row in rows]
 
     keys = {
-        (step["product"], tuple(step["reactants"])) for row in tasks for route in row["reference_routes"] for step in route["steps"]
+        (step["product"], tuple(step["reactants"]))
+        for row in tasks
+        for route in row["reference_routes"]
+        for step in route["steps"]
     }
     library_rows, others = [], []
     for row in iter_reactions(source / "library" / "reactions.jsonl.gz"):
@@ -56,11 +59,15 @@ def main() -> int:
     library_rows += rng.sample([r for r in others if r["visible"]], EXTRA_REACTIONS)
     all_templates = json.loads((source / "library" / "templates.json").read_text())
     needed = {row["template"] for row in library_rows if row["template"]}
-    kept = dict(Counter(all_templates).most_common(TOP_TEMPLATES)) | {t: all_templates[t] for t in needed if t in all_templates}
+    kept = dict(Counter(all_templates).most_common(TOP_TEMPLATES)) | {
+        t: all_templates[t] for t in needed if t in all_templates
+    }
     visible = json.loads((source / "library" / "templates-visible.json").read_text())
 
     stock = (source / "stocks" / "paroutes-archive-leaves.smi").read_text().split()
-    needed_stock = {m for row in tasks for route in row["reference_routes"] for s in route["steps"] for m in s["reactants"]}
+    needed_stock = {
+        m for row in tasks for route in row["reference_routes"] for s in route["steps"] for m in s["reactants"]
+    }
     stock_slice = sorted(set(stock) & needed_stock | set(rng.sample(stock, EXTRA_STOCK)))
 
     for split, rows in rows_by_split.items():
@@ -72,10 +79,15 @@ def main() -> int:
     write_library(out, library_rows, Counter(kept), Counter({t: n for t, n in visible.items() if t in kept}), reagents)
     manifest = json.loads((source / "manifest.json").read_text())
     (out / "manifest.json").write_text(
-        json.dumps({key: manifest[key] for key in ("schema_version", "task_schema", "stock", "library", "leakage", "design")}, indent=1)
+        json.dumps(
+            {key: manifest[key] for key in ("schema_version", "task_schema", "stock", "library", "leakage", "design")},
+            indent=1,
+        )
     )
     write_checksums(out)
-    print(f"wrote {out}: {len(tasks)} tasks, {len(library_rows)} reactions, {len(kept)} templates, {len(stock_slice)} stock")
+    print(
+        f"wrote {out}: {len(tasks)} tasks, {len(library_rows)} reactions, {len(kept)} templates, {len(stock_slice)} stock"
+    )
     return 0
 
 

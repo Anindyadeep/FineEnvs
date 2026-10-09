@@ -175,7 +175,14 @@ ARYL_HETERO = ("aryl_N", "aryl_O", "aryl_S")
 
 # (rule, confidence, predicate); the first matching rule wins.
 RULES: list[tuple[str, str, Callable[[_Delta], bool]]] = [
-    ("heteroaromatic ring formation", "medium", lambda d: (d.rings > max(d.acetal_pg, 0) or (d.rings == 0 and d.largest_carbon_piece > 0)) and d.het_aromatic_rings > 0),
+    (
+        "heteroaromatic ring formation",
+        "medium",
+        lambda d: (
+            (d.rings > max(d.acetal_pg, 0) or (d.rings == 0 and d.largest_carbon_piece > 0))
+            and d.het_aromatic_rings > 0
+        ),
+    ),
     ("cyclisation", "medium", lambda d: d.rings > max(d.acetal_pg, 0)),
     ("Boc deprotection", "high", lambda d: d.boc < 0),
     ("Boc protection", "high", lambda d: d.boc > 0),
@@ -191,13 +198,33 @@ RULES: list[tuple[str, str, Callable[[_Delta], bool]]] = [
     ("Suzuki coupling", "high", lambda d: d.boron < 0 and (_aryl_lg_lost(d) or _lost(d, "alkyl_x"))),
     ("borylation", "high", lambda d: d.boron > 0),
     ("Sonogashira coupling", "high", lambda d: d.aryl_alkyne > 0 and _aryl_lg_lost(d)),
-    ("Heck reaction", "medium", lambda d: d.aryl_vinyl > 0 and _aryl_lg_lost(d) and _lost(d, "terminal_alkene", "michael")),
+    (
+        "Heck reaction",
+        "medium",
+        lambda d: d.aryl_vinyl > 0 and _aryl_lg_lost(d) and _lost(d, "terminal_alkene", "michael"),
+    ),
     ("cyanation", "medium", lambda d: d.aryl_nitrile > 0 and _aryl_lg_lost(d)),
-    ("Stille/Negishi/Kumada coupling", "medium", lambda d: _lost(d, "tin_zinc", "organometal") and _aryl_lg_lost(d) and not _lost(d, *CARBONYL, "nitrile", "ester", "amide")),
+    (
+        "Stille/Negishi/Kumada coupling",
+        "medium",
+        lambda d: (
+            _lost(d, "tin_zinc", "organometal")
+            and _aryl_lg_lost(d)
+            and not _lost(d, *CARBONYL, "nitrile", "ester", "amide")
+        ),
+    ),
     ("sulfonamide formation", "high", lambda d: d.sulfonamide > 0),
     ("O-sulfonylation", "high", lambda d: d.sulfonate_ester > 0),
-    ("urea formation", "high", lambda d: d.urea > 0 and (d.n_h < 0 or _lost(d, "isocyanate", "acyl_halide", "carbamate", "acid"))),
-    ("carbamate formation", "high", lambda d: d.carbamate > 0 and (d.n_h < 0 or _lost(d, "isocyanate", "acyl_halide", "alcohol", "phenol", "acid"))),
+    (
+        "urea formation",
+        "high",
+        lambda d: d.urea > 0 and (d.n_h < 0 or _lost(d, "isocyanate", "acyl_halide", "carbamate", "acid")),
+    ),
+    (
+        "carbamate formation",
+        "high",
+        lambda d: d.carbamate > 0 and (d.n_h < 0 or _lost(d, "isocyanate", "acyl_halide", "alcohol", "phenol", "acid")),
+    ),
     ("amide coupling", "high", lambda d: d.amide > 0 and (d.n_h < 0 or _lost(d, *ACYL_DONOR))),
     ("esterification", "high", lambda d: d.ester > 0 and _lost(d, *ACYL_DONOR, "alcohol", "phenol")),
     ("amidine/guanidine formation", "medium", lambda d: d.amidine > 0),
@@ -208,20 +235,76 @@ RULES: list[tuple[str, str, Callable[[_Delta], bool]]] = [
     ("N-alkylation", "high", lambda d: d.alkyl_N > 0 and _lost(d, "alkyl_x", "epoxide")),
     ("O-alkylation", "high", lambda d: d.alkyl_O > 0 and _lost(d, "alkyl_x", "epoxide")),
     ("S-alkylation", "high", lambda d: d.alkyl_S > 0 and _lost(d, "alkyl_x", "epoxide")),
-    ("Mitsunobu / dehydrative alkylation", "medium", lambda d: _gained(d, *HETERO_ALKYL) and _lost(d, "alcohol") and not _lost(d, "amide", *ACYL_DONOR)),
-    ("Grignard/organolithium addition", "high", lambda d: _lost(d, "organometal") and _lost(d, *CARBONYL, "nitrile", "ester", "amide", "acyl_halide")),
+    (
+        "Mitsunobu / dehydrative alkylation",
+        "medium",
+        lambda d: _gained(d, *HETERO_ALKYL) and _lost(d, "alcohol") and not _lost(d, "amide", *ACYL_DONOR),
+    ),
+    (
+        "Grignard/organolithium addition",
+        "high",
+        lambda d: _lost(d, "organometal") and _lost(d, *CARBONYL, "nitrile", "ester", "amide", "acyl_halide"),
+    ),
     ("Wittig/HWE olefination", "high", lambda d: d.phosphorus < 0 and d.cc_double > 0),
-    ("halogen-metal exchange addition", "low", lambda d: _aryl_lg_lost(d) and d.largest_carbon_piece > 0 and _lost(d, *CARBONYL, "ester", "amide", "nitrile") and not _gained(d, *ARYL_HETERO)),
-    ("other C-C coupling (aryl halide)", "low", lambda d: _aryl_lg_lost(d) and d.largest_carbon_piece > 0 and not _gained(d, *ARYL_HETERO, *HETERO_ALKYL)),
-    ("Friedel-Crafts acylation/formylation", "medium", lambda d: d.aryl_carbonyl > 0 and _lost(d, "acyl_halide", "anhydride", "acid", "amide") and not _aryl_lg_lost(d)),
-    ("C-alkylation", "medium", lambda d: _lost(d, "alkyl_x") and (d.largest_carbon_piece > 0 or d.nitrile > 0) and not _gained(d, *HETERO_ALKYL)),
-    ("aldol/Claisen/Knoevenagel", "low", lambda d: d.largest_carbon_piece > 0 and _lost(d, *CARBONYL, "ester", "nitrile", "acyl_halide") and not _gained(d, "alkyl_N", "alkyl_O", "aryl_N", "aryl_O", "imine", "c_x")),
+    (
+        "halogen-metal exchange addition",
+        "low",
+        lambda d: (
+            _aryl_lg_lost(d)
+            and d.largest_carbon_piece > 0
+            and _lost(d, *CARBONYL, "ester", "amide", "nitrile")
+            and not _gained(d, *ARYL_HETERO)
+        ),
+    ),
+    (
+        "other C-C coupling (aryl halide)",
+        "low",
+        lambda d: _aryl_lg_lost(d) and d.largest_carbon_piece > 0 and not _gained(d, *ARYL_HETERO, *HETERO_ALKYL),
+    ),
+    (
+        "Friedel-Crafts acylation/formylation",
+        "medium",
+        lambda d: (
+            d.aryl_carbonyl > 0 and _lost(d, "acyl_halide", "anhydride", "acid", "amide") and not _aryl_lg_lost(d)
+        ),
+    ),
+    (
+        "C-alkylation",
+        "medium",
+        lambda d: (
+            _lost(d, "alkyl_x") and (d.largest_carbon_piece > 0 or d.nitrile > 0) and not _gained(d, *HETERO_ALKYL)
+        ),
+    ),
+    (
+        "aldol/Claisen/Knoevenagel",
+        "low",
+        lambda d: (
+            d.largest_carbon_piece > 0
+            and _lost(d, *CARBONYL, "ester", "nitrile", "acyl_halide")
+            and not _gained(d, "alkyl_N", "alkyl_O", "aryl_N", "aryl_O", "imine", "c_x")
+        ),
+    ),
     ("Curtius rearrangement", "medium", lambda d: d.acid < 0 and d.nh2 > 0 and not _gained(d, "amide")),
     ("nitro reduction", "high", lambda d: d.nitro < 0 and d.n_h > 0),
     ("nitrile/azide reduction", "high", lambda d: _lost(d, "nitrile", "azide") and d.nh2 > 0),
-    ("ester hydrolysis", "high", lambda d: (d.ester < 0 and d.acid > 0) or (d.acyl_pg_ester < 0 and _gained(d, "alcohol", "phenol"))),
-    ("amide/nitrile hydrolysis", "medium", lambda d: (d.nitrile < 0 and _gained(d, "amide", "acid")) or (_lost(d, "amide", "carbamate", "urea") and (d.acid > 0 or d.n_h > 0) and d.alkyl_N <= 0)),
-    ("ester/acid reduction", "high", lambda d: _lost(d, "ester", "acid", "amide", "nitrile") and _gained(d, "alcohol", "aldehyde")),
+    (
+        "ester hydrolysis",
+        "high",
+        lambda d: (d.ester < 0 and d.acid > 0) or (d.acyl_pg_ester < 0 and _gained(d, "alcohol", "phenol")),
+    ),
+    (
+        "amide/nitrile hydrolysis",
+        "medium",
+        lambda d: (
+            (d.nitrile < 0 and _gained(d, "amide", "acid"))
+            or (_lost(d, "amide", "carbamate", "urea") and (d.acid > 0 or d.n_h > 0) and d.alkyl_N <= 0)
+        ),
+    ),
+    (
+        "ester/acid reduction",
+        "high",
+        lambda d: _lost(d, "ester", "acid", "amide", "nitrile") and _gained(d, "alcohol", "aldehyde"),
+    ),
     ("amide reduction", "medium", lambda d: d.amide < 0 and d.alkyl_N > 0),
     ("ketone/aldehyde reduction", "high", lambda d: _lost(d, *CARBONYL) and d.alcohol > 0),
     ("ether cleavage (O-dealkylation)", "medium", lambda d: d.alkyl_O < 0 and _gained(d, "phenol", "alcohol")),
@@ -230,10 +313,26 @@ RULES: list[tuple[str, str, Callable[[_Delta], bool]]] = [
     ("halogenation", "medium", lambda d: d.c_x > 0),
     ("nitration", "high", lambda d: d.nitro > 0),
     ("thionation", "medium", lambda d: d.thiocarbonyl > 0),
-    ("oxidation", "medium", lambda d: (d.alcohol < 0 and _gained(d, *CARBONYL, "acid")) or (d.aldehyde < 0 and d.acid > 0) or _gained(d, "s_ox", "n_oxide", "epoxide") or (d.boron < 0 and d.phenol > 0) or (d.alkyl_x < 0 and _gained(d, *CARBONYL)) or (d.cc_double < 0 and d.alcohol > 0) or (d.aromatic_atoms > 0 and d.rings == 0)),
+    (
+        "oxidation",
+        "medium",
+        lambda d: (
+            (d.alcohol < 0 and _gained(d, *CARBONYL, "acid"))
+            or (d.aldehyde < 0 and d.acid > 0)
+            or _gained(d, "s_ox", "n_oxide", "epoxide")
+            or (d.boron < 0 and d.phenol > 0)
+            or (d.alkyl_x < 0 and _gained(d, *CARBONYL))
+            or (d.cc_double < 0 and d.alcohol > 0)
+            or (d.aromatic_atoms > 0 and d.rings == 0)
+        ),
+    ),
     ("imine/oxime/hydrazone formation", "medium", lambda d: _lost(d, *CARBONYL) and d.imine > 0),
     ("dehydration to nitrile", "medium", lambda d: d.nitrile > 0 and _lost(d, "amide", "imine", "aldehyde")),
-    ("hydrogenation", "medium", lambda d: d.heavy == 0 and (_lost(d, "cc_double", "cc_triple", "imine") or d.aromatic_atoms < 0)),
+    (
+        "hydrogenation",
+        "medium",
+        lambda d: d.heavy == 0 and (_lost(d, "cc_double", "cc_triple", "imine") or d.aromatic_atoms < 0),
+    ),
     ("dehalogenation", "medium", lambda d: d.c_x < 0 and d.largest_carbon_piece <= 0),
     ("deoxygenation", "low", lambda d: _lost(d, "alcohol", *CARBONYL) and d.heavy < 0),
 ]

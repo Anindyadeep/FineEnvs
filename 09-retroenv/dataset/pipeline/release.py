@@ -105,7 +105,9 @@ def write_stock(root: Path, stock: frozenset[str]) -> None:
     path.write_text("\n".join(sorted(stock)) + "\n")
 
 
-def write_library(root: Path, rows: list[dict], templates: Counter, visible_templates: Counter, reagents: list[str]) -> None:
+def write_library(
+    root: Path, rows: list[dict], templates: Counter, visible_templates: Counter, reagents: list[str]
+) -> None:
     library = root / "library"
     library.mkdir(parents=True, exist_ok=True)
     with gzip.open(library / "reactions.jsonl.gz", "wt", encoding="utf-8") as handle:
@@ -129,7 +131,9 @@ def summarize(rows_by_split: dict[str, list[dict]]) -> dict:
             "tier": dict(sorted(Counter(r["difficulty"]["tier"] for r in standard).items())),
             "convergent": sum(r["difficulty"]["convergent"] for r in standard),
             "stereo_targets": sum(r["difficulty"]["stereocentres"] > 0 for r in standard),
-            "forbidden_classes": dict(Counter(c for r in rows for c in r["constraints"]["forbidden_classes"]).most_common()),
+            "forbidden_classes": dict(
+                Counter(c for r in rows for c in r["constraints"]["forbidden_classes"]).most_common()
+            ),
         }
     return summary
 
@@ -194,11 +198,14 @@ SPLIT_USE = {
 
 def write_card(root: Path, manifest: dict) -> None:
     summary = manifest["summary"]
+
     def files(folder: str) -> str:
         return "\n".join(f"  - split: {s}\n    path: {folder}/{s}.jsonl" for s in SPLITS)
 
     rows = "\n".join(
-        f"| {s} | {summary[s]['parents']:,} | {summary[s]['tasks']:,} | {SPLIT_USE[s]} |" for s in SPLITS if s in summary
+        f"| {s} | {summary[s]['parents']:,} | {summary[s]['tasks']:,} | {SPLIT_USE[s]} |"
+        for s in SPLITS
+        if s in summary
     )
     (root / "README.md").write_text(
         CARD.replace("{public}", files("tasks-public"))

@@ -131,7 +131,13 @@ class RouteVerifier:
         for route in routes:
             if route.duplicate:
                 continue
-            route_structure = [route.root_ok, not route.errors, bool(route.step_results), route.molecule_validity == 1.0, not route.warnings]
+            route_structure = [
+                route.root_ok,
+                not route.errors,
+                bool(route.step_results),
+                route.molecule_validity == 1.0,
+                not route.warnings,
+            ]
             structure += sum(route_structure) / len(route_structure)
             if not route.root_ok:
                 continue
@@ -152,7 +158,9 @@ class RouteVerifier:
             ),
             default=0.0,
         )
-        exact = any(route.signature == ref_signature for route in valid_routes for _, ref_signature in reference_signatures)
+        exact = any(
+            route.signature == ref_signature for route in valid_routes for _, ref_signature in reference_signatures
+        )
         components = {
             "parse": 1.0 if routes else 0.0,
             "structure": structure / slots,
