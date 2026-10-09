@@ -1,5 +1,26 @@
 # Evaluate a model
 
+## One command
+
+Name the models; `evaluate.py` runs them all at once on an evaluation set and writes one board.
+
+```bash
+uv sync --extra dev --extra eval
+uv run python eval/evaluate.py claude-sonnet-5-5 gpt-6-sol "Qwen/Qwen3.8-27B:novita"
+uv run python eval/evaluate.py --board eval/boards/core30-nothink.json   # the 13-model board
+uv run python eval/evaluate.py "google/gemma-4-31B-it:novita" --tasks 1    # a one-task smoke test
+```
+
+* **Provider** follows from the id: `claude-*` on the Anthropic API, `gpt-*` on the OpenAI Responses API, `org/name` on the HF router. Pin a router provider (`org/name:novita`) so prices are stable. Keys come from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` and `HF_TOKEN`, or the nearest `.env` above the working directory.
+* **Set**: `--set core30` (default; 10 easy, 10 medium, 10 hard inside final_eval), `--set final_eval` (50), or a whole split (`--set dev`).
+* **Protocol**: thinking off (`--thinking default` to keep it), malformed submissions graded as sent (`--repair` to repair them), the environment's budget of 16 turns and 32 tool calls, `--max-cost` 25 USD per model. Models that cannot turn thinking off run at their lowest effort: Claude Opus 5.5 and Fable 5.1, gpt-6.1-sol and gpt-6-astra.
+* **Server**: `--server URL` (a local `start.sh`, or the Space `https://fineenvs-retroenv.hf.space`), or none, and a local server is started from the pinned bucket snapshot (`envs/retro_route/openenv/prepare.py`; the first start downloads it).
+* **Output**: `runs/core30-nothink/<model>/` and `<model>.log`, and the board in `runs/core30-nothink/results/RESULTS.md`. A rerun resumes each model, so adding a model later costs only that model and it joins the same board. `--tasks 1` is a smoke test into `runs/core30-nothink-smoke`.
+
+Any other `run_eval.py` option passes through to every model (`--attempts 3`, `--max-turns 24`).
+
+## One model, one split
+
 `run_eval.py` runs a model on a split through the OpenEnv server. Every tool call and the reward come from the server, the same one used for training and the playground. Without `--server` it starts a local server for `--benchmark-dir` (default `data/release/RetroEnv-RL`; download it from [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) or point `--server` at one started with `RETROENV_TASKS_REPO`). The release is fully open: every split, test_id and test_hard included, ships its known routes, and the runs on 30 test_id tasks are under `runs/`. Use dev to pick checkpoints during training and report test_id and test_hard, so test scores never steer training. For a quick board, `--split final_eval` runs the 50-task subset of the two test splits (17 easy, 17 medium, 16 hard); it is served by a server started from the bucket snapshot (`envs/retro_route/openenv/start.sh`, then `--server http://127.0.0.1:8000`).
 
 ```bash
@@ -37,7 +58,10 @@ Each held-out split has 1,000 targets plus variants; run a dev slice first to es
 | `--toolset` | `full` | `unaided` starts the local server without `validate_disconnection` (an ablation) |
 | `--concurrency` | 8 | One WebSocket session per episode |
 | `--max-cost` | none | Stops scheduling episodes once spend reaches this many USD |
-| `--tool-choice` | `required` | Some HF providers only accept `auto` (novita, and cerebras for Qwen3.8) |
+| `--provider` | from `--model` | `claude-*` anthropic, `gpt-*` openai, `org/name` hf |
+| `--thinking` | `default` | `off`: no thinking, or the lowest effort where a model cannot turn it off |
+| `--no-repair` | off | Grade a malformed submission as sent, as training does |
+| `--tool-choice` | `required`; `auto` on hf | Some HF providers only accept `auto` (novita, and cerebras for Qwen3.8) |
 
 Keys come from the environment: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `HF_TOKEN`, `OPENROUTER_API_KEY`, or `--api-key-env`.
 

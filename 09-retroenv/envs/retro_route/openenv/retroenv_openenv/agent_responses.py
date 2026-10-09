@@ -27,6 +27,15 @@ class ResponsesConfig:
     repair: bool = True  # repair a submission sent as broken JSON (see normalize_arguments)
 
 
+# These reject effort "none" (and "minimal"); "low" is their floor.
+_LOWEST_EFFORT_ONLY = ("gpt-6.1-sol", "gpt-6-astra")
+
+
+def thinking_off(model: str) -> str:
+    """The reasoning effort of a non-thinking run of ``model``: none, or its lowest effort."""
+    return "low" if model.startswith(_LOWEST_EFFORT_ONLY) else "none"
+
+
 def run_episode(llm: Any, env: RetroEnvClient, opening: dict[str, Any], config: ResponsesConfig) -> dict[str, Any]:
     tools = [
         {

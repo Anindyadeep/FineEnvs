@@ -8,6 +8,10 @@ port for ``--benchmark-dir`` and stops it at the end.
     uv run --extra eval python eval/run_eval.py --provider anthropic \\
         --model claude-opus-5-5 --split test_id --output runs/test_id/opus-5-5
 
+``--provider`` can be left out for ``claude-*`` (anthropic), ``gpt-*`` (openai) and Hub
+ids such as ``Qwen/Qwen3.8-27B:novita`` (hf). To run several models on an evaluation set
+and get one board, use ``eval/evaluate.py``.
+
 ``--provider reference`` runs no model: a scripted expert replays each task's
 compliant known routes through the same loop and server (the SFT trajectory generator).
 
@@ -54,6 +58,8 @@ PROVIDERS: dict[str, dict[str, Any]] = {
         "key": "HF_TOKEN",
         "token_param": "max_tokens",
         "temperature": 0.0,
+        # Some router providers reject a forced tool_choice (novita; cerebras for Qwen3.8).
+        "tool_choice": "auto",
     },
     "openrouter": {
         "backend": "openai",
@@ -73,6 +79,19 @@ PROVIDERS: dict[str, dict[str, Any]] = {
     # No model and no key: the scripted expert reads <benchmark-dir>/tasks-private.
     "reference": {"backend": "reference", "key": None},
 }
+# Recorded in identity.json but not enforced on a rerun: neither changes what the run measures.
+RECORDED_ONLY = ("agent_code_sha256", "server")
+
+
+def infer_provider(model: str) -> str | None:
+    """The provider a model id implies: Claude and GPT ids, or a Hub id served by the HF router."""
+    if model.startswith("claude-"):
+        return "anthropic"
+    if model.startswith("gpt-"):
+        return "openai"
+    if "/" in model:
+        return "hf"
+    return None
 
 
 def write_json(path: Path, value: Any) -> None:
@@ -237,7 +256,9 @@ def recompute(output: Path) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--provider", choices=sorted(PROVIDERS), required=True)
+    parser.add_argument(
+        "--provider", choices=sorted(PROVIDERS), help="default: implied by --model (claude-*, gpt-*, org/name)"
+    )
     parser.add_argument("--model", help="required unless --provider reference")
     parser.add_argument("--label", help="display name in summaries (defaults to the model)")
     parser.add_argument("--endpoint", help="OpenAI-compatible base URL (custom provider, or an override)")
@@ -265,15 +286,15 @@ def main() -> int:
         "--thinking",
         choices=("default", "off"),
         default="default",
-        help="off: Claude without thinking (lowest effort where it cannot be disabled), OpenAI reasoning "
-        "effort none unless --reasoning-effort says otherwise, open models with enable_thinking=false",
+        help="off: Claude without thinking, OpenAI reasoning effort none, open models with "
+        "enable_thinking=false; models that cannot turn it off run at their lowest effort",
     )
     parser.add_argument(
         "--no-repair",
         action="store_true",
         help="pass a malformed emit_routes submission through instead of repairing it, as training does",
     )
-    parser.add_argument("--tool-choice", default="required", help="OpenAI-compatible tool_choice")
+    parser.add_argument("--tool-choice", help="OpenAI-compatible tool_choice (default: required; auto on hf)")
     parser.add_argument("--max-cost", type=float, help="stop scheduling episodes once this many USD are spent")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
@@ -286,6 +307,9 @@ def main() -> int:
     if args.recompute:
         return recompute(args.output)
 
+    args.provider = args.provider or (infer_provider(args.model) if args.model else None)
+    if not args.provider:
+        parser.error("--provider is required unless --model implies it (claude-*, gpt-*, org/name)")
     preset = PROVIDERS[args.provider]
     if args.temperature is not None and preset["backend"] != "openai":
         parser.error(
@@ -336,7 +360,7 @@ def main() -> int:
         from openai import OpenAI
 
         llm = OpenAI(base_url=endpoint, api_key=os.environ[key_env], timeout=600, max_retries=4)
-        effort = args.reasoning_effort or ("none" if args.thinking == "off" else None)
+        effort = args.reasoning_effort or (agent_responses.thinking_off(args.model) if args.thinking == "off" else None)
         config = agent_responses.ResponsesConfig(
             model=args.model,
             max_turns=args.max_turns,
@@ -356,12 +380,13 @@ def main() -> int:
 
         llm = OpenAI(base_url=endpoint, api_key=os.environ[key_env], timeout=600, max_retries=4)
         temperature = args.temperature if args.temperature is not None else preset.get("temperature")
+        tool_choice = args.tool_choice or preset.get("tool_choice", "required")
         config = agent.AgentConfig(
             model=args.model,
             max_turns=args.max_turns,
             max_tokens=args.max_tokens or 4096,
             temperature=temperature,
-            tool_choice=args.tool_choice,
+            tool_choice=tool_choice,
             token_param=preset.get("token_param", "max_tokens"),
             reasoning_effort=args.reasoning_effort,
             extra_body=dict(preset.get("extra_body") or {}),
@@ -374,7 +399,7 @@ def main() -> int:
         sampling = {
             "max_tokens": config.max_tokens,
             "temperature": temperature,
-            "tool_choice": args.tool_choice,
+            "tool_choice": tool_choice,
             "reasoning_effort": args.reasoning_effort,
             "thinking": args.thinking,
         }
@@ -386,6 +411,10 @@ def main() -> int:
     # An evaluation set (final_eval) has no task file of its own; its tasks live in their source splits.
     for path in [private] if private.exists() else sorted((args.benchmark_dir / "tasks-private").glob("*.jsonl")):
         tiers.update({row["task_id"]: row.get("difficulty", {}).get("tier") for row in map(json.loads, path.open())})
+    # Without the release (a remote --server), the frozen evaluation sets still carry each task's tier.
+    for path in sorted((ROOT / "data").glob("eval-*.json")):
+        for task in json.loads(path.read_text())["tasks"]:
+            tiers.setdefault(task["task_id"], task.get("tier"))
 
     output: Path = args.output
     with (
@@ -437,10 +466,12 @@ def main() -> int:
         if identity_path.exists():
             previous = json.loads(identity_path.read_text())
             changed = sorted(k for k in identity if previous.get(k) != json.loads(json.dumps(identity[k])))
-            if changed == ["agent_code_sha256"]:
-                # Recorded, not enforced: a loop fix for one provider should not void other runs.
-                print("note: agent code changed since this run started", file=sys.stderr)
-                identity["agent_code_sha256"] = previous["agent_code_sha256"]
+            recorded = [key for key in changed if key in RECORDED_ONLY]
+            if recorded and recorded == changed:
+                # A loop fix for one provider, or another server for the same tasks and tools,
+                # should not void a run; the identity keeps what the run started with.
+                print(f"note: {', '.join(recorded)} changed since this run started", file=sys.stderr)
+                identity.update({key: previous.get(key) for key in recorded})
             elif changed:
                 raise SystemExit(f"{output} belongs to a different evaluation (changed: {changed}); use a new --output")
         write_json(identity_path, identity)
