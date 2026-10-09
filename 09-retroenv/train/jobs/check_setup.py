@@ -72,7 +72,7 @@ def main():
                 "versions": {name: version(name) for name in ("trl", "transformers", "vllm", "peft", "openenv")},
                 "model": args.model,
                 "prefix_preserving": preserving,
-                "tools": [schema["name"] for schema in schemas],
+                "tools": [schema["function"]["name"] for schema in schemas],
             },
             indent=2,
         )

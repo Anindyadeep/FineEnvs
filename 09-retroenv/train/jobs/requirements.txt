@@ -6,7 +6,9 @@ datasets
 accelerate
 bitsandbytes
 kernels
-trackio
+# Trackio needs huggingface-hub<2; unpinned, uv takes hub 2 and falls back to a broken trackio 0.2.
+trackio>=0.40
+huggingface-hub>=1.31,<2
 # The RetroEnv client: installed with --no-deps next to these.
 openenv==0.4.2
 json-repair>=0.30
