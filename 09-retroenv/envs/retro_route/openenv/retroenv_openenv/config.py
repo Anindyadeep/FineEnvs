@@ -22,7 +22,7 @@ from retroenv.store import TaskStore
 from retroenv.tools import tool_names
 from retroenv.verifier import prepare_stock
 
-ENV_NAME = "retro_route"
+from .client import ENV_NAME  # noqa: F401  (defined with the client, which must stay light)
 
 
 def _resolve_root() -> Path:

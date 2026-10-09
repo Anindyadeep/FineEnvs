@@ -42,6 +42,46 @@ indexed task, Dr. GRPO, ten optimizer steps, and optional JSONL traces via
 `RETROENV_TRACE_PATH=outputs/episodes.jsonl`. Treat it as a wiring/overfit run;
 do not publish its metric as model quality.
 
+## GRPO on HF Jobs
+
+Two developer scripts train the same experiment, LoRA on Qwen3.8-27B (or Qwen3.6-35B-A3B)
+against the RetroEnv server, with the evaluation board's system prompt and non-thinking chat
+template. Read their numbered sections in order:
+
+| Script | Trainer | Batch |
+|---|---|---|
+| [sync_grpo.py](sync_grpo.py) | TRL `GRPOTrainer`: generate a batch, then one optimizer step | 16 episodes per step (2 tasks × 8) |
+| [async_grpo.py](async_grpo.py) | TRL `AsyncGRPOTrainer`: generation keeps running while it trains | the same, at most 4 policy versions stale |
+
+Both use `RemoteRetroRouteEnv` as `environment_factory`: its public methods are the tools, each
+call goes to the server over one WebSocket session per rollout, and the `emit_routes` grade is
+the reward. An episode that never submits scores 0, as in evaluation; one whose session broke
+scores NaN and stays out of its group's baseline. The default curriculum is the 51,358 standard
+train tasks with a depth budget of 4 (`--max-depth`).
+
+[jobs/](jobs) runs them on HF Jobs the way `05-multi-harness-rl/jobs` does, on `h200x2`: vLLM
+serves the model on one GPU, the trainer runs on the other, and the RetroEnv server runs on CPU
+from the project's locked environment, preparing its serving snapshot from the public bucket
+mounted at `/data`. Checkpoints, logs and boards are written to an output bucket as they happen.
+
+```bash
+B=FineEnvs/retroenv-rl-runs
+python train/jobs/hf_job.py check --name check --bucket $B --submit            # CPU: installs and setup checks
+python train/jobs/hf_job.py smoke --mode sync --name sync-smoke --bucket $B --submit
+python train/jobs/hf_job.py train --mode async --name async-100 --bucket $B --steps 100 --submit
+python train/jobs/hf_job.py eval --name async-100-eval --bucket $B \
+    --checkpoint /outputs/async-100/checkpoint-100 --submit                       # the core30 board
+python train/jobs/hf_job.py eval --name base-eval --bucket $B --submit           # the base model, same harness
+```
+
+Without `--submit` the launcher prints the job plan. `check_setup.py` runs first in every job and
+fails before the GPUs load anything if TRL cannot train through the model's chat template, a
+tool call does not round-trip through it, or a tool's docstring does not become a schema. The
+smoke test runs two updates, checks both checkpoints, then merges checkpoint 2 and evaluates
+it on two tasks. Evaluation merges the adapter into the base weights (`jobs/merge_lora.py`),
+serves them with vLLM and runs `eval/evaluate.py` with the board's protocol, so its RESULTS.md
+lines up with `runs/core30-nothink`.
+
 ## Scaling RL
 
 The release's train split holds every eligible target that shares no leakage key with a

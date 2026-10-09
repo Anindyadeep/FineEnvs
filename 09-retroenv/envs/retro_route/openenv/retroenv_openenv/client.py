@@ -4,11 +4,16 @@
 one client per concurrent episode. ``RemoteRetroRouteEnv`` exposes the same
 tools as plain methods for TRL's ``environment_factory``, mirroring the
 in-process ``retroenv.training.RetroRouteTrainingEnv``.
+
+This module imports neither RDKit nor the server stack, so a trainer can install the
+package with ``--no-deps`` next to ``openenv`` and ``httpx`` and talk to a server
+running in its own environment.
 """
 
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass
 from typing import Any
 
@@ -16,7 +21,9 @@ import httpx
 from openenv.core.env_server.mcp_types import CallToolAction
 from openenv.core.mcp_client import MCPToolClient
 
-from .config import ENV_NAME
+# The server's environment name (``config`` re-exports it); defined here so importing the
+# client does not load the task store.
+ENV_NAME = "retro_route"
 
 
 @dataclass
@@ -143,22 +150,40 @@ class RemoteRetroRouteEnv:
     def __init__(self, server: str | None = None):
         import os
 
-        self._client = RetroEnvClient(server or os.environ["RETROENV_SERVER"])
+        self._server = server or os.environ["RETROENV_SERVER"]
+        self._client = RetroEnvClient(self._server)
         self._reward = 0.0
+        self._failed = False
 
     def reset(self, split: str = "train", index: int = 0, **_: Any) -> str:
-        self._reward = 0.0
-        return self._client.reset(split=split, index=index)["prompt"]
+        self._reward, self._failed = 0.0, False
+        try:
+            return self._client.reset(split=split, index=index)["prompt"]
+        except Exception:
+            # A session the server dropped stays dead in the client, and every later call on it
+            # fails; open a fresh one once instead of losing this instance for the whole run.
+            self._close()
+            self._client = RetroEnvClient(self._server)
+            return self._client.reset(split=split, index=index)["prompt"]
 
     def get_reward(self) -> float:
-        return self._reward
+        # A rollout whose session broke has no grade, which is not the same as a wrong answer:
+        # NaN keeps it out of its group's baseline instead of scoring it 0.
+        return math.nan if self._failed else self._reward
 
     def _close(self) -> None:
         """Release the WebSocket session. TRL and the evaluators call this."""
-        self._client.close()
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     def _call(self, name: str, **arguments: Any) -> str:
-        outcome = self._client.call(name, arguments)
+        try:
+            outcome = self._client.call(name, arguments)
+        except Exception as exc:
+            self._failed = True
+            return json.dumps({"error": f"environment unavailable: {type(exc).__name__}"})
         if outcome.reward is not None:
             self._reward = float(outcome.reward)
         payload = outcome.result if outcome.error is None else {"error": outcome.error}
