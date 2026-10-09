@@ -21,6 +21,9 @@ from .client import _tool_payload
 from .config import shared_resources
 from .environment import RetroRouteEnvironment
 
+# Tasks the Task dropdown lists at once: every task of the evaluation splits; train (75k) is searched.
+TASK_PAGE = 1500
+
 
 def _arguments_template(tool: str, target: str) -> dict[str, Any]:
     return {
@@ -189,15 +192,33 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
     splits = store.splits()
     default_split = "test_id" if "test_id" in splits else splits[0]
 
-    def task_choices(split: str) -> list[tuple[str, int]]:
+    def task_start(split: str, query: str) -> int | None:
+        """The index a task number or task id names in ``split``; None when there is none."""
+        query = query.strip()
+        if query.isdigit():
+            return int(query) if int(query) < len(store.tasks(split)) else None
+        return store.position(split, query) if query else 0
+
+    def task_choices(split: str, start: int = 0) -> list[tuple[str, int]]:
+        """One page of the split from ``start``.
+
+        Listing all 75k train tasks took seconds to build and to send to the browser; a page holds
+        every task of the evaluation splits, and Go to task reaches the rest.
+        """
+        tasks = store.tasks(split)
+        width = max(3, len(str(len(tasks) - 1)))
         return [
             (
-                f"{i:03d} · {task.variant} · depth ≤ {task.max_depth} · {task.min_routes} route{'s' if task.min_routes > 1 else ''} · "
-                f"{task.target_smiles[:48]}",
+                f"{i:0{width}d} · {task.variant} · depth ≤ {task.max_depth} · {task.min_routes} "
+                f"route{'s' if task.min_routes > 1 else ''} · {task.target_smiles[:48]}",
                 i,
             )
-            for i, task in enumerate(store.tasks(split))
+            for i, task in enumerate(tasks[start : start + TASK_PAGE], start)
         ]
+
+    def task_info(split: str) -> str:
+        count = len(store.tasks(split))
+        return f"{count:,} tasks" + (f"; {TASK_PAGE:,} listed at a time" if count > TASK_PAGE else "")
 
     def tool_names(session: PlaygroundSession) -> list[str]:
         names = list(session.opening["tools"]) if session.opening else []
@@ -252,7 +273,8 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
         with gr.Row(equal_height=False):
             with gr.Column(scale=4, min_width=320):
                 split = gr.Dropdown(splits, value=default_split, label="Split")
-                task = gr.Dropdown(task_choices(default_split), value=0, label="Task")
+                task = gr.Dropdown(task_choices(default_split), value=0, label="Task", info=task_info(default_split))
+                find = gr.Textbox("", label="Go to task", placeholder="task number or task id, then Enter", max_lines=1)
                 start = gr.Button("Start episode", variant="primary")
                 with gr.Tabs():
                     with gr.Tab("2D"):
@@ -296,7 +318,14 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
         gr.HTML(credits, apply_default_css=False)
 
         def on_split(name: str):
-            return gr.update(choices=task_choices(name), value=0)
+            return gr.update(choices=task_choices(name), value=0, info=task_info(name))
+
+        def on_find(split_name: str, query: str):
+            start = task_start(split_name, query)
+            if start is None:
+                gr.Warning(f"No task {query.strip()!r} in {split_name}")
+                return gr.update()
+            return gr.update(choices=task_choices(split_name, start), value=start)
 
         def on_start(state: PlaygroundSession, split_name: str, index: int):
             state.start(split_name, index)
@@ -379,6 +408,7 @@ def build_ui(*_: Any, **__: Any) -> gr.Blocks:
 
         plan_outputs = [target, history, score, routes, plan_view, frontier, candidate, selected]
         split.change(on_split, split, task)
+        find.submit(on_find, [split, find], task)
         start.click(
             on_start,
             [session, split, task],
