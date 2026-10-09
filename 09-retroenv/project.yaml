@@ -23,3 +23,4 @@ envs:
       openenv:
         transport: http-mcp
         verified: true
+        space: FineEnvs/retroenv
