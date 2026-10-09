@@ -33,6 +33,12 @@ def main():
     if "environment_factory" not in inspect.signature(AsyncGRPOTrainer).parameters:
         raise RuntimeError("AsyncGRPOTrainer.environment_factory is required; install TRL main")
 
+    # Gated DeltaNet layers need FLA's kernels; without them training runs a slow PyTorch loop.
+    import importlib.util
+
+    if importlib.util.find_spec("fla") is None:
+        raise RuntimeError("flash-linear-attention is missing; Qwen3.5-architecture training would be ~10x slower")
+
     # The trainer talks to the server through the light client: no RDKit, no task store.
     from retroenv_openenv.client import RemoteRetroRouteEnv
 

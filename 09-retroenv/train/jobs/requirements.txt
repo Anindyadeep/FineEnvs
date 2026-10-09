@@ -2,6 +2,10 @@
 # install.sh; the RetroEnv server and evaluator use the project's own locked environment.
 vllm==0.25.1
 peft
+# Qwen3.5-architecture models run three of every four layers as Gated DeltaNet. Without FLA's
+# Triton kernels Transformers falls back to a PyTorch loop: about 40 s per 6k-token training
+# sequence on a 27B model, which made a 100-step run take some 40 hours.
+flash-linear-attention
 datasets
 accelerate
 bitsandbytes
