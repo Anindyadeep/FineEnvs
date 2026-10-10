@@ -150,6 +150,22 @@ def test_larger_flavors_split_the_gpus_and_watch_runs_on_cpu(monkeypatch, capsys
         _plan(monkeypatch, capsys, "watch", "--run", "a", "--bucket", "o/b")  # no training job to follow
 
 
+def test_a_difficulty_sweep_samples_several_attempts_of_project_task_ids(monkeypatch, capsys, tmp_path):
+    ids = "train/sweeps/train-sweep250-0.txt"
+    plan = _plan(
+        monkeypatch, capsys, "eval", "--name", "s0", "--bucket", "o/b", "--set", "train", "--task-ids", ids,
+        "--attempts", "8", "--temperature", "0.8",
+    )  # fmt: skip
+    command = plan["command"]
+    assert command[command.index("--task-ids") + 1] == ids and command[command.index("--attempts") + 1] == "8"
+    assert command[command.index("--temperature") + 1] == "0.8" and command[command.index("--set") + 1] == "train"
+    assert ids in {path.relative_to(ROOT).as_posix() for path in _launcher().source_files()}
+    plain = _plan(monkeypatch, capsys, "eval", "--name", "e", "--bucket", "o/b")["command"]
+    assert "--attempts" not in plain and "--temperature" not in plain  # the board's protocol stays the default
+    with pytest.raises(SystemExit):  # the job only sees project files
+        _plan(monkeypatch, capsys, "eval", "--name", "e", "--bucket", "o/b", "--task-ids", str(tmp_path / "x.txt"))
+
+
 def test_the_fsdp2_config_reaches_the_job():
     files = {path.relative_to(ROOT).as_posix() for path in _launcher().source_files()}
     assert "train/jobs/fsdp2.yaml" in files and "train/jobs/eval_watch.py" in files

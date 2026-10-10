@@ -38,6 +38,9 @@ def main():
     parser.add_argument("--checkpoint", help="For eval: a LoRA checkpoint directory; omit for the base model")
     parser.add_argument("--set", default="core30", help="For eval: evaluation set or split")
     parser.add_argument("--tasks", type=int, help="For eval: only the first N tasks")
+    parser.add_argument("--task-ids", help="For eval: a file of task ids in --set's split, one per line")
+    parser.add_argument("--attempts", type=int, default=1, help="For eval: episodes per task")
+    parser.add_argument("--temperature", type=float, help="For eval: sampling temperature (default: the board's 0)")
     parser.add_argument("--concurrency", type=int, default=16, help="For eval: episodes at once")
     parser.add_argument("--label", help="For eval: the name on the board")
     parser.add_argument("--vllm-gpus", type=int, help="For train: GPUs serving vLLM (default: half)")
@@ -212,6 +215,10 @@ def main():
                 "--label", label,
             ]  # fmt: skip
             command += ["--tasks", str(args.tasks)] if args.tasks else []
+            # Passed through to run_eval.py: several sampled attempts per task label its difficulty.
+            command += ["--task-ids", args.task_ids] if args.task_ids else []
+            command += ["--attempts", str(args.attempts)] if args.attempts > 1 else []
+            command += ["--temperature", str(args.temperature)] if args.temperature is not None else []
             run(command, "eval")
     finally:
         for process in reversed(children):

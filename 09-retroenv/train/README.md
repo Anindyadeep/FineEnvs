@@ -122,6 +122,27 @@ constraint variants. Train against it, watch dev, and report on test_id and test
 - **Flat groups.** A base model that never passes gets no GRPO signal; warm-start it with
   SFT first.
 
+### Difficulty sweep
+
+`difficulty_sweep.py` measures where the base model has signal before a run spends GPUs on
+flat groups. `select` draws 250 standard train tasks the way the evaluation sets are drawn
+(equal tiers, shortest-route depths visited round-robin) into `train/sweeps/`, split into two
+shards; each shard is one evaluation job sampling every task 8 times at the trainer's
+temperature:
+
+```bash
+python train/difficulty_sweep.py select
+for shard in 0 1; do
+  python train/jobs/hf_job.py eval --name sweep250-$shard --bucket <owner>/<bucket> --set train \
+    --task-ids train/sweeps/train-sweep250-$shard.txt --attempts 8 --temperature 0.8 --concurrency 64 --submit
+done
+python train/difficulty_sweep.py report runs/sweep250 --server http://127.0.0.1:8010
+```
+
+`report` writes pass@1 and pass@8 by tier and by depth, what each episode ended in, a label per
+task (`never`, `learnable` or `always` solved, with broken submissions re-graded as repaired),
+`learnable.txt` for the next run's task list, and the solved transcripts as `sft.jsonl`.
+
 ## SFT warm start
 
 The scripted chemist (`retroenv_openenv/agent_reference.py`, `--provider reference` in

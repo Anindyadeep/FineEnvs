@@ -28,7 +28,12 @@ def regrade(run: Path, url: str) -> dict | None:
     episodes = [json.loads(path.read_text()) for path in sorted((run / "episodes").glob("*.json"))]
     rows = []
     for episode in (e for e in episodes if e.get("graded")):
-        row = {"task_id": episode["task_id"], "reward": episode["reward"], "valid": episode["valid"]}
+        row = {
+            "task_id": episode["task_id"],
+            "attempt": episode.get("attempt", 0),
+            "reward": episode["reward"],
+            "valid": episode["valid"],
+        }
         broken = any(failure.startswith("invalid JSON") for failure in episode["hard_failures"])
         fixed, coerced = normalize_arguments("emit_routes", {"submission": episode["submission"]})
         if broken and coerced:
