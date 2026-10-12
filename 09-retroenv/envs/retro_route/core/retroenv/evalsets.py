@@ -25,15 +25,25 @@ def evalset_id(record: dict[str, Any]) -> str:
     return hashlib.sha256(json.dumps(body, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
 
 
+# select_tiered rescans its candidates on every pick, so without this each draw costs an
+# RDKit canonicalization per candidate per pick. Task ids are unique across the release.
+_FIRST_REACTION: dict[str, str] = {}
+
+
 def first_reaction(task: RetroTask) -> str:
     """The class of the known route's first disconnection, preferring the patent route."""
+    if task.task_id in _FIRST_REACTION:
+        return _FIRST_REACTION[task.task_id]
     target = canonicalize_smiles(task.target_smiles)
     routes = sorted(task.reference_routes, key=lambda route: route.kind != "patent")
+    found = "other"
     for route in routes:
-        for step in route.steps:
-            if canonicalize_smiles(step.product) == target:
-                return step.reaction_class or "other"
-    return "other"
+        step = next((s for s in route.steps if canonicalize_smiles(s.product) == target), None)
+        if step is not None:
+            found = step.reaction_class or "other"
+            break
+    _FIRST_REACTION[task.task_id] = found
+    return found
 
 
 def _order(seed: str, task_id: str) -> str:

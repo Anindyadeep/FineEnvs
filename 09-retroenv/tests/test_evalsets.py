@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import shutil
 from pathlib import Path
@@ -88,3 +89,45 @@ def test_the_committed_core30_is_intact_and_nested_in_final_eval():
     tiers = [t["tier"] for t in core["tasks"]]
     assert core["size"] == 30 and (tiers.count("easy"), tiers.count("medium"), tiers.count("hard")) == (10, 10, 10)
     assert {t["task_id"] for t in core["tasks"]} <= final
+
+
+RL_SETS = {
+    "train12k": (13200, ("train",)),
+    "val150": (150, ("dev",)),
+    "core100": (100, ("test_id", "test_hard")),
+    "core150": (150, ("test_id", "test_hard")),
+    "heldout300": (300, ("test_id", "test_hard")),
+}
+# Each board keeps the previous one's tasks, in order, and appends the new ones.
+NESTED_BOARDS = ("final_eval", "core100", "core150")
+# core100 is a prefix of core150, so the largest board stands for both.
+DISJOINT = ("train12k", "val150", "core150", "heldout300")
+
+
+@pytest.mark.parametrize("name", sorted(RL_SETS))
+def test_the_committed_rl_sets_are_intact(name):
+    size, sources = RL_SETS[name]
+    record = load_evalset(ROOT / "data" / f"eval-{name}.json")
+    assert record["name"] == name and record["size"] == size
+    assert {t["source_split"] for t in record["tasks"]} <= set(sources)
+
+
+@pytest.mark.parametrize("smaller,bigger", list(zip(NESTED_BOARDS, NESTED_BOARDS[1:])))
+def test_each_board_extends_the_previous_one_without_reordering_it(smaller, bigger):
+    held = [t["task_id"] for t in load_evalset(ROOT / "data" / f"eval-{smaller}.json")["tasks"]]
+    board = [t["task_id"] for t in load_evalset(ROOT / "data" / f"eval-{bigger}.json")["tasks"]]
+    assert board[: len(held)] == held
+
+
+@pytest.mark.parametrize("name,quotas", [("core100", (34, 33, 33)), ("core150", (50, 50, 50))])
+def test_the_boards_are_evenly_tiered(name, quotas):
+    tiers = [t["tier"] for t in load_evalset(ROOT / "data" / f"eval-{name}.json")["tasks"]]
+    assert (tiers.count("easy"), tiers.count("medium"), tiers.count("hard")) == quotas
+
+
+def test_the_rl_sets_never_share_a_task():
+    ids = {
+        name: {t["task_id"] for t in load_evalset(ROOT / "data" / f"eval-{name}.json")["tasks"]} for name in DISJOINT
+    }
+    for left, right in itertools.combinations(sorted(ids), 2):
+        assert not ids[left] & ids[right], f"{left} and {right} share tasks"
