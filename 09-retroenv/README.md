@@ -1,123 +1,206 @@
 # 09 · RetroEnv
 
-Plan a retrosynthesis: given a target molecule, work back to molecules you can buy. The
-agent inspects molecules, searches a frozen stock and train-visible reactions, checks
-disconnections, and submits molecule/reaction trees. A deterministic verifier judges every
-step against a frozen reaction library, not against a hidden answer, so any chemically
-supported route that ends in stock counts; known patent routes only add a bonus.
+**The job: given a molecule, work backwards to molecules you can buy.**
 
-Library support (a recorded reaction, or a retro-template seen at least five times) is
-evidence, not proof that a synthesis works in the lab.
+That is retrosynthesis. A chemist looks at a target compound and asks "what two simpler things
+could I have combined to make this?", then asks the same of those, and keeps going until
+everything on the shopping list is something a supplier sells. RetroEnv turns that into an RL
+environment. The agent gets a target molecule and a budget, uses tools to inspect molecules and
+look up reactions, and finally submits one or more synthesis trees.
+
+A deterministic verifier grades the answer. It does **not** compare against a hidden answer key.
+It checks each proposed reaction against a frozen library of real reactions and reaction
+templates, and checks that every leaf of the tree is really in the stock list. So any route that
+holds up chemically counts, even one no chemist has published. Matching a known patent route
+only adds a small bonus.
+
+One honest caveat: "the library supports this step" means a real reaction like it is on record,
+not that the reaction will work in a lab. No yield, no selectivity, no safety claim.
 
 ## Quick start
 
 ```bash
 uv sync --extra dev --extra eval
-uv run pytest                                            # runs on tests/fixtures/mini-release
+uv run pytest                                      # runs on tests/fixtures/mini-release
 
-# Serve the pinned snapshot from the FineEnvs bucket (115 MB once, then about 10 s per start)
-uv run bash envs/retro_route/openenv/start.sh            # http://localhost:8000/web/
-uv run python explorer/server.py                         # http://127.0.0.1:8050
+# Run the server on the curated dataset
+uv run hf download LiteFold/RetroEnv-Curated --repo-type dataset --local-dir data/release/RetroEnv-Curated
+RETROENV_BENCHMARK_DIR=data/release/RetroEnv-Curated uv run uvicorn retroenv_openenv.server:app --port 8000
+
+# Or the hosted copy, and a local browser for the data
+uv run bash envs/retro_route/openenv/start.sh      # http://localhost:8000/web/
+uv run python explorer/server.py                   # http://127.0.0.1:8050
 ```
 
-| Artifact | Where |
+| Hosted | Where |
 |---|---|
-| The release: every split's tasks and known routes, stock, reaction library, eval runs | [LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv) |
-| The serving copy: that release pinned, its serving index and `final_eval` | [FineEnvs/retroenv-bucket](https://huggingface.co/buckets/FineEnvs/retroenv-bucket) |
 | The environment server and playground | [FineEnvs/retroenv](https://huggingface.co/spaces/FineEnvs/retroenv) |
+| The pinned serving copy and its prebuilt index | [FineEnvs/retroenv-bucket](https://huggingface.co/buckets/FineEnvs/retroenv-bucket) |
 
-To work from the release itself, or rebuild it:
+## The data
+
+Use **[LiteFold/RetroEnv-Curated](https://huggingface.co/datasets/LiteFold/RetroEnv-Curated)**.
+Four splits, nothing to choose between. It is self-contained: tasks, the stock list and the
+reaction library in one 68 MB download, so pointing `RETROENV_BENCHMARK_DIR` at it is all the
+setup there is.
+
+| Split | Tasks | easy / medium / hard | What it is for |
+|---|---:|---|---|
+| `train` | 13,200 | 6,812 / 5,153 / 1,235 | RL rollouts and SFT |
+| `validation` | 150 | 50 / 50 / 50 | checking a checkpoint mid-training |
+| `test` | 150 | 50 / 50 / 50 | the board you iterate against |
+| `heldout` | 300 | 100 / 100 / 100 | the sealed final test; run it once |
+
+The four splits never share a task. Held-out targets share no patent, molecule, reaction,
+scaffold group or close structural near-duplicate with `train` or with each other, and library
+reactions that touch a held-out task are hidden from the agent's tools. Difficulty tiers come
+from the release's own labels: route length, how unusual the chemistry is, whether the route is
+convergent, and how rare its templates are.
+
+`train` carries 1,200 constraint variants on top of its 12,000 standard tasks, because the
+constraint rules are only learnable from tasks that impose them. The split must keep the name
+`train`: the environment hides a task's own reactions from the tools only when
+`task.split == "train"`, so renaming it would let a rollout look up its own answer.
+
+The full source release, with all 78,505 tasks, is
+[LiteFold/RetroEnv](https://huggingface.co/datasets/LiteFold/RetroEnv). The curated splits are
+cut from it by [`dataset/build_curated.py`](dataset/build_curated.py), which takes about six
+seconds. To rebuild everything from scratch instead:
 
 ```bash
-uv run hf download LiteFold/RetroEnv --repo-type dataset --local-dir data/release/RetroEnv-RL
-RETROENV_BENCHMARK_DIR=data/release/RetroEnv-RL uv run uvicorn retroenv_openenv.server:app --port 8000
-
-# Rebuild from PaRoutes v2 (346 MB download, about an hour on 32 cores)
-uv run python dataset/download_raw.py --source paroutes-v2-benchmark
-uv run python -m dataset.build_release                   # data/release/RetroEnv-RL (git-ignored)
-uv run python -m dataset.audit_release                   # leakage, solvability, reward probes
-uv run python -m dataset.publish_release --runs runs     # publish to LiteFold/RetroEnv
-
-# Then the serving copy: the index, final_eval, the bucket, and the pinned manifest
-uv run python -m dataset.build_final_eval                # data/eval-final_eval.json
-uv run python -m dataset.publish_bucket                  # FineEnvs/retroenv-bucket
-python envs/retro_route/openenv/deploy.py --repo FineEnvs/retroenv --public
+uv run python dataset/download_raw.py --source paroutes-v2-benchmark   # 346 MB
+uv run python -m dataset.build_release        # the full release, about an hour on 32 cores
+uv run python -m dataset.audit_release        # leakage, solvability, reward probes
+uv run python -m dataset.build_task_sets      # freeze the curated selections
+uv run python -m dataset.build_curated --publish LiteFold/RetroEnv-Curated
 ```
 
-## The release
+## Input: what a task looks like
 
-Built from PaRoutes v2 (457,160 patent routes, CC-BY-4.0). The stock is every leaf of every
-archive route (102,915 molecules). Targets have 10–60 heavy atoms, no metal, are not in
-stock, and have a shortest stock-closed route of 2–8 reactions through clean corpus
-reactions.
+One JSON row. The whole job is in `target_smiles`.
 
-| Split | Targets | Tasks | Shortest route | Use |
-|---|---:|---:|---|---|
-| train | 70,028 | 75,224 | 2–8 (73% two-step) | RL rollouts, SFT bootstrap |
-| dev | 1,000 | 1,079 | 2–7, flattened | checkpoints, reward calibration |
-| test_id | 1,000 | 1,083 | 2–8, flattened | unseen targets, training distribution |
-| test_hard | 1,000 | 1,119 | 4–8 | novel (nearest other-patent Tanimoto < 0.6) and convergent, rare-template or complex-ring chemistry |
-| final_eval | 50 | 50 | 2–8 | 17 easy, 17 medium, 16 hard standard tasks from test_id and test_hard, for a quick board |
+```json
+{"task_id": "retro_003174b322aa68b3", "split": "test", "variant": "standard",
+ "target_smiles": "CNCc1cn(S(=O)(=O)c2ccc(C)cc2)c(-c2ccccc2)n1",
+ "max_depth": 4, "min_routes": 1, "max_routes": 5,
+ "stock_id": "paroutes-archive-leaves",
+ "constraints": {"forbidden_classes": [], "excluded_stock": []}}
+```
 
-`final_eval` is a subset, not a new split: [`data/eval-final_eval.json`](data/eval-final_eval.json) pins its task ids, and the server serves them as their own split, scored exactly as in test_id and test_hard.
+In plain terms: *here is a molecule. Work back to things you can buy. Your longest chain may be
+4 reactions. Give me between 1 and 5 different routes.*
 
-Held-out targets share no patent, route molecule, reaction, scaffold group or Tanimoto ≥
-0.90 near-duplicate with train or with each other, including the molecules of variant
-witness routes. Library reactions that touch a held-out key never reach the tools.
+The stock list is deliberately **not** in the prompt. The only way to find out whether a
+molecule is buyable is to call `stock_retrieve`. Some tasks add a constraint: a reaction class
+you may not use, or specific building blocks removed from the shelf.
 
-Variants (each with a witness route proving it solvable): `max_depth` (budget equal to the
-shortest known depth while the patent route is longer), `restricted_stock` and
-`forbidden_class` (break both the shortest witness and the patent route), and `diversity`
-(two or three routes with different first disconnections).
+## Output: what the agent sends back
 
-## The environment
+One `emit_routes` call. Each route is a tree that alternates molecule → reaction → molecule.
+
+```json
+{"routes": [
+  {"type": "mol", "smiles": "<the target>", "in_stock": false,
+   "children": [
+     {"type": "reaction", "is_reaction": true,
+      "metadata": {"reaction_class": "reductive amination",
+                   "explanation": "...", "confidence": 0.75,
+                   "literature": [], "precursor_roles": {"CN": "nucleophile"}},
+      "children": [
+        {"type": "mol", "smiles": "CN", "in_stock": true, "children": []},
+        {"type": "mol", "smiles": "<intermediate>", "in_stock": false,
+         "children": [ ... keep going ... ]}
+      ]}]}]}
+```
+
+Read it top-down: this molecule is made by this reaction, from these precursors. A molecule with
+`children: []` is where the agent stopped, and `in_stock` is its claim that you can buy it.
+Recurse until every leaf is in stock.
+
+Three things decide the grade: the root must be the target, every reaction must be one the
+library accepts, and every leaf must really be in stock. Claiming `in_stock: true` for something
+that is not is the one mistake that caps the score hard.
+
+## The tools
 
 | Tool | Answers from |
 |---|---|
-| `inspect_molecule`, `pubchem_lookup` | RDKit on the given SMILES (names need a frozen cache) |
-| `stock_retrieve` | The task's stock (excluded building blocks absent): exact, InChIKey, class, SMARTS or similarity, at most 20 results |
-| `reaction_precedent_search`, `reaction_conditions_search`, `search_literature` | Train-visible corpus reactions; a train task's own keys are hidden too |
-| `validate_disconnection` | Train-visible reactions and frequent templates (the verifier uses the full library) |
-| `reaction_class_lookup` | The verifier's own rule-based reaction classifier |
-| `emit_routes` | The verifier; terminal |
+| `inspect_molecule`, `pubchem_lookup` | RDKit on the SMILES you pass |
+| `stock_retrieve` | The task's stock: exact, InChIKey, class, SMARTS or similarity, 20 results max |
+| `reaction_precedent_search`, `reaction_conditions_search`, `search_literature` | Train-visible corpus reactions |
+| `validate_disconnection` | Train-visible reactions and frequent templates |
+| `reaction_class_lookup` | The verifier's own reaction classifier |
+| `emit_routes` | The verifier. Terminal: the episode ends here |
 
-No tool reads a task's hidden routes. `RETROENV_TOOLSET=unaided` drops
-`validate_disconnection` as an ablation.
+No tool can read a task's hidden known routes, and a training task's own reactions are hidden
+from search and validation so a rollout cannot look up its own answer.
+`RETROENV_TOOLSET=unaided` drops `validate_disconnection` as an ablation.
 
-## Reward
+## How scoring works
 
-A route is valid when it starts at the target, is a well-formed tree within the depth
-budget, every step is library-supported, every leaf is in the task's stock, no leaf falsely
-claims stock, and the constraints hold. A task is solved with enough valid routes with
-distinct first disconnections.
+A single route is **valid** when all of this holds: it starts at the target, it is a well-formed
+tree inside the depth budget, every step is supported by the library, every leaf is in stock, no
+leaf lies about being in stock, and the constraints hold. A task is **solved** when enough valid
+routes with different first disconnections were submitted.
 
-| Component | Weight |
-|---|---:|
-| Parse | 0.02 |
-| Structure (target root, tree, valid molecules, metadata) | 0.08 |
-| Library-supported steps | 0.35 |
-| Leaves in stock, claimed truthfully | 0.15 |
-| Constraint compliance | 0.10 |
-| Efficiency (shortest known depth / route depth) | 0.10 |
-| Distinct valid first disconnections | 0.05 |
-| Similarity to a compliant known route | 0.10 |
-| Exact known-route match | 0.05 |
+Alongside that pass/fail, the environment returns a reward between 0 and 1. The reward currently
+shipped is a weighted sum of nine parts:
 
-Per-route components are averaged over the submitted routes, so duplicates and junk routes
-dilute the score. A false in-stock claim caps the reward at 0.40, and a submission that never
-starts at the target at 0.10.
+| Part | Weight | What it measures |
+|---|---:|---|
+| Parse | 0.02 | the submission is valid JSON |
+| Structure | 0.08 | well-formed tree, valid molecules, reaction metadata present |
+| Supported steps | 0.35 | the share of reactions the library accepts |
+| Leaves in stock | 0.15 | leaves are buyable and honestly claimed |
+| Constraints | 0.10 | no forbidden class, no excluded building block, within depth |
+| Efficiency | 0.10 | shortest known route depth ÷ your depth |
+| Diversity | 0.05 | distinct valid first disconnections |
+| Similarity to a known route | 0.10 | overlap with a real patent route |
+| Exact known-route match | 0.05 | you found the patent route |
+
+Per-route parts are averaged over the routes submitted, so duplicates and junk dilute the score.
+A false in-stock claim caps the reward at 0.40; a submission that never starts at the target
+caps at 0.10.
+
+**This reward is measurably gameable, and a replacement has been designed and tested.** Short
+version: it pays 0.35 for "the library accepted my reaction" without ever requiring the route to
+reach something buyable, plus 0.20 for well-formed JSON. So taking the first disconnection of a
+known route and stopping there scores **0.603**, against about 0.88 for actually solving the
+task. Across 889 real submissions, 26% of failures scored higher than the worst pass. The
+proposed replacement scores that same stop-early submission at 0.055 and puts every failure
+below every pass. It lives in [`research/reward/`](research/reward) and is **not wired into the
+verifier yet**. [`RESEARCH.md`](RESEARCH.md) has the full study, the evidence and the numbers.
+
+Training applies its own mitigation in the meantime: `sync_grpo.py --partial-credit 0.5` halves
+a failed submission's reward, which closes about half the gap.
+
+## Running an evaluation
+
+```bash
+uv run python eval/run_eval.py --provider openrouter --model openai/gpt-4.1 \
+  --split test --output runs/my-run
+```
+
+Every tool call and the reward come from the server, the same one training uses. Each episode is
+written to `runs/my-run/episodes/` with its full transcript and submission, and `summary.json`
+holds pass@1, mean reward and cost. Reruns resume.
+
+Because the reward is terminal and depends only on `(task, submission)`, stored episodes can be
+re-scored under a different reward offline, with no model calls. That is how the reward study
+was done.
 
 ## Layout
 
 | Path | What it is |
 |---|---|
-| [`envs/retro_route/core`](envs/retro_route/core) | The `retroenv` package: chemistry, reaction library, classifier, leakage keys, verifier, tools and session |
-| [`envs/retro_route/openenv`](envs/retro_route/openenv) | OpenEnv server, client, agent loops (including the scripted chemist), hand-play UI, Docker/Space deployment |
-| [`dataset/`](dataset) | Raw-source intake, `build_release.py` with its `pipeline/` stages, and `audit_release.py` |
-| [`eval/`](eval) | `run_eval.py` through the server, and summaries |
-| [`train/`](train) | SFT and GRPO recipes |
+| [`envs/retro_route/core`](envs/retro_route/core) | The `retroenv` package: chemistry, reaction library, classifier, leakage keys, verifier, tools, session |
+| [`envs/retro_route/openenv`](envs/retro_route/openenv) | OpenEnv server, client, agent loops, hand-play UI, deployment |
+| [`dataset/`](dataset) | Source intake, `build_release.py`, `build_curated.py`, `audit_release.py` |
+| [`eval/`](eval) | `run_eval.py` through the server, boards and summaries |
+| [`train/`](train) | SFT and GRPO recipes, HF Jobs launchers, the difficulty sweep |
+| [`research/reward/`](research/reward) | The reward study: evidence cache, candidate rewards, hack probes, ablation |
 | [`explorer/`](explorer) | Local browser for a release, with route graphs and live play |
 | [`tests/`](tests) | Unit and integration tests, and the committed mini-release fixture |
 
-Earlier benchmarks (v1–v3), their model runs and SFT data are archived outside the repo.
-[`RESEARCH.md`](RESEARCH.md) has the source and verifier evidence.
+[`RESEARCH.md`](RESEARCH.md) has the data-source evidence, the verifier's boundary, and the
+reward study.
