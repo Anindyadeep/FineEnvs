@@ -19,5 +19,8 @@ __pycache__/
 # Model evaluation runs: transcripts include solved routes, so only summaries are committed.
 runs/
 
+# The reward study's distilled cache of those runs; rebuild with `ablate build`. report.json is kept.
+research/reward/evidence/
+
 # The serving snapshot prepare.py fetches for a local server (about 230 MB unpacked).
 envs/retro_route/openenv/prepared/
